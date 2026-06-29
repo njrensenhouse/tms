@@ -168,6 +168,24 @@
   .bar-handle{position:absolute; top:0; bottom:0; width:10px; z-index:2; cursor:ew-resize; touch-action:none;}
   .bar-handle.l{left:0;} .bar-handle.r{right:0;}
 
+  /* readable form text + quiet scrollbars in dark mode */
+  input, textarea, select{ color:var(--ink); }
+  ::placeholder{ color:var(--faint); opacity:1; }
+  *{ scrollbar-width:thin; scrollbar-color:var(--line2) transparent; }
+  ::-webkit-scrollbar{ width:10px; height:10px; }
+  ::-webkit-scrollbar-thumb{ background:var(--line2); border-radius:6px; border:2px solid transparent; background-clip:padding-box; }
+  ::-webkit-scrollbar-thumb:hover{ background:var(--muted); }
+  ::-webkit-scrollbar-track{ background:transparent; }
+  /* Notion-style hover “+” to add */
+  .proj-zone{ min-height:46px; }
+  .day-col{ min-height:130px; }
+  .cell-add{ width:22px; height:22px; border:1px dashed var(--line2); border-radius:6px; color:var(--faint); display:flex; align-items:center; justify-content:center; opacity:0; cursor:pointer; margin:3px auto 0; transition:opacity .12s, border-color .12s; background:transparent; padding:0; }
+  .cell-add svg{ width:13px; height:13px; }
+  .day-col:hover .cell-add, .proj-add .slot:hover .cell-add{ opacity:.7; }
+  .cell-add:hover{ opacity:1; border-color:var(--muted); color:var(--ink); }
+  .proj-add{ position:absolute; inset:0; display:grid; z-index:0; }
+  .proj-add .slot{ display:flex; align-items:flex-start; justify-content:center; }
+
   @media (max-width:820px){
     .main{grid-template-columns:1fr;}
     .rail{order:-1;}
@@ -307,8 +325,10 @@ function renderTimeline(){
       return `<div class="chip" style="background:${a.tint}; border-color:${a.color}; color:${a.ink};">
         <span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span><span class="lbl">${t.title}</span></div>`;
     }).join("");
-    dayCols+=`<div class="day-col" data-day="${idx}">${items}</div>`;
+    dayCols+=`<div class="day-col" data-day="${idx}">${items}<button class="cell-add" data-add="task" data-day="${idx}" aria-label="Add task">${ICON.plus}</button></div>`;
   }
+  let projAddSlots="";
+  for(let d=0; d<totalDays; d++){ const idx=firstIdx+d; projAddSlots+=`<div class="slot"><button class="cell-add" data-add="project" data-day="${idx}" aria-label="Add project">${ICON.plus}</button></div>`; }
   let dayHeadCells="";
   for(let d=0; d<totalDays; d++){ const idx=firstIdx+d; dayHeadCells+=`<div class="${idx===TODAY?'today':''}" data-day="${idx}">${dateForIndex(idx).getDate()}</div>`; }
   let weekCells="";
@@ -323,7 +343,7 @@ function renderTimeline(){
       <div class="wk-head" style="grid-template-columns:repeat(${win.weeks}, ${COLW*7}px);">${weekCells}</div>
       <div class="day-head" style="grid-template-columns:repeat(${totalDays}, ${COLW}px);">${dayHeadCells}</div>
       <div class="zone-label">PROJECTS</div>
-      <div class="proj-zone"><div class="today-col" style="left:${todayLeft}px; width:${COLW}px;"></div>${projRows}</div>
+      <div class="proj-zone"><div class="proj-add" style="grid-template-columns:repeat(${totalDays}, ${COLW}px);">${projAddSlots}</div><div class="today-col" style="left:${todayLeft}px; width:${COLW}px;"></div>${projRows}</div>
       <div class="zone-label">TASKS</div>
       <div class="task-zone" style="grid-template-columns:repeat(${totalDays}, ${COLW}px); position:relative;"><div class="today-col" style="left:${todayLeft}px; width:${COLW}px;"></div>${dayCols}</div>
     </div></div></div>
@@ -500,16 +520,16 @@ function renderAdd(){
         <button class="tab ${d.type==='project'?'on':''}" data-addtype="project">Project</button>
       </div>
       <div class="field"><label>Title</label><input type="text" id="addTitle" value="${(d.title||'').replace(/"/g,'&quot;')}" placeholder="What needs doing?"></div>
-      <div class="field"><label>Area</label><select id="addArea" class="sel">${areaOpts}</select></div>
+      <div class="field"><label>Area</label><select id="addAreaSel" class="sel">${areaOpts}</select></div>
       ${d.type==='project'?`<div class="field"><label>Length (days)</label><input type="text" id="addLen" inputmode="numeric" value="${d.len}"></div>`:''}
       <div style="display:flex; justify-content:flex-end; margin-top:4px;"><button class="txt-btn primary" id="addSave">Add</button></div>
     </div>
   </div></div>`;
 }
-function openAdd(day){
+function openAdd(day, type){
   const keys=Object.keys(AREAS);
   if(!keys.length){ alert('Add an area first (+ in the Areas rail).'); return; }
-  addDraft={type:'task', title:'', area:keys[0], day, len:3};
+  addDraft={type:(type==='project'?'project':'task'), title:'', area:keys[0], day, len:3};
   addOpen=true; mount();
 }
 
@@ -674,18 +694,18 @@ document.addEventListener('click', e=>{
   if(e.target.closest('#closeSettings') || e.target.id==="settingsOverlay"){ settingsOpen=false; mount(); return; }
   /* quick-add overlay */
   const addTypeBtn=e.target.closest('[data-addtype]');
-  if(addTypeBtn){ const ti=document.getElementById('addTitle'); if(ti) addDraft.title=ti.value; const ar=document.getElementById('addArea'); if(ar) addDraft.area=ar.value; const ln=document.getElementById('addLen'); if(ln) addDraft.len=parseInt(ln.value)||addDraft.len; addDraft.type=addTypeBtn.dataset.addtype; mount(); return; }
+  if(addTypeBtn){ const ti=document.getElementById('addTitle'); if(ti) addDraft.title=ti.value; const ar=document.getElementById('addAreaSel'); if(ar) addDraft.area=ar.value; const ln=document.getElementById('addLen'); if(ln) addDraft.len=parseInt(ln.value)||addDraft.len; addDraft.type=addTypeBtn.dataset.addtype; mount(); return; }
   if(e.target.closest('#addCancel') || e.target.id==="addOverlay"){ addOpen=false; addDraft=null; mount(); return; }
   if(e.target.closest('#addSave')){
     const title=(document.getElementById('addTitle').value||'').trim(); if(!title){ const n=document.getElementById('addTitle'); if(n) n.focus(); return; }
-    const area=document.getElementById('addArea').value;
+    const area=document.getElementById('addAreaSel').value;
     if(addDraft.type==='project'){ let len=parseInt(document.getElementById('addLen').value)||1; if(len<1) len=1; const p={id:'p'+Date.now(), area, title, start:addDraft.day, len, done:false}; PROJECTS.push(p); saveProject(p); }
     else { const t={id:'t'+Date.now(), area, title, day:addDraft.day, done:false}; TASKS.push(t); saveTask(t); }
     addOpen=false; addDraft=null; mount(); return;
   }
-  /* click an empty date on the timeline to add a task/project */
-  const dayEl=e.target.closest('[data-day]');
-  if(dayEl && !e.target.closest('.chip') && !e.target.closest('.bar')){ openAdd(parseInt(dayEl.dataset.day,10)); return; }
+  /* Notion-style “+” to add a task/project on a date */
+  const addBtn=e.target.closest('[data-add]');
+  if(addBtn){ openAdd(parseInt(addBtn.dataset.day,10), addBtn.dataset.add); return; }
   /* open area */
   const card=e.target.closest('[data-area]');
   if(card){ view={page:"area", area:card.dataset.area}; mount(); return; }
