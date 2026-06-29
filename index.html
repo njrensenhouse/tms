@@ -218,6 +218,16 @@ function applyScale(s){ s=Math.max(0.8,Math.min(1.6, s||1)); uiScale=s; document
 function applyTheme(t){ uiTheme=(t==="light"?"light":"dark"); document.documentElement.setAttribute('data-theme', uiTheme); try{ localStorage.setItem('tms_theme', uiTheme); }catch(e){} }
 applyTheme(uiTheme); applyScale(uiScale);
 
+/* ---- Todoist two-way sync via Supabase Edge Function ---- */
+const SYNC_URL = SUPABASE_URL + "/functions/v1/todoist-sync";
+async function sync(action, payload){
+  try{
+    const r=await fetch(SYNC_URL,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+SUPABASE_KEY,"apikey":SUPABASE_KEY},body:JSON.stringify({action, ...(payload||{})})});
+    return await r.json();
+  }catch(e){ console.error("sync "+action, e); return {error:String(e)}; }
+}
+function ymd(i){ const d=dateForIndex(i); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+
 const ICON = {
   check:'<svg viewBox="0 0 12 12"><path d="M2 6.2l2.6 2.6L10 3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   pencil:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/></svg>',
@@ -225,6 +235,7 @@ const ICON = {
   back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
   gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  sync:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>',
 };
 
 /* preset palette: [color, tint, ink] */
@@ -488,6 +499,7 @@ function topbar(){
 function sidebar(){
   return `<div class="sidebar">
     <button class="side-btn" id="openSearch" aria-label="Search">${ICON.search}</button>
+    <button class="side-btn" id="doSync" aria-label="Sync with Todoist">${ICON.sync}</button>
     <button class="side-btn side-bottom" id="openSettings" aria-label="Settings">${ICON.gear}</button>
   </div>`;
 }
@@ -528,7 +540,7 @@ function renderAdd(){
 }
 function openAdd(day, type){
   const keys=Object.keys(AREAS);
-  if(!keys.length){ alert('Add an area first (+ in the Areas rail).'); return; }
+  if(!keys.length){ alert('No areas yet — add a project in Todoist and Sync, or wait for sync to finish.'); return; }
   addDraft={type:(type==='project'?'project':'task'), title:'', area:keys[0], day, len:3};
   addOpen=true; mount();
 }
@@ -547,7 +559,7 @@ function initBars(){
         else { let ns=oStart+dDays, len=oLen-(ns-oStart); if(len<1){ ns=oStart+oLen-1; len=1; } p.start=ns; p.len=len; }
         bar.style.left=((p.start-win.start)*COLW)+'px'; bar.style.width=(p.len*COLW-5)+'px';
       };
-      const up=()=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); saveProject(p); };
+      const up=()=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); saveProject(p); sync("update",{id:p.id, due_date:ymd(p.start), deadline_date:ymd(p.start+p.len-1)}); };
       document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
     });
   });
@@ -675,17 +687,19 @@ async function unsplashSearch(q){
   }catch(err){ if(hint) hint.textContent="Couldn't reach Unsplash. If you're viewing this inside a preview, open the file directly in Safari — sandboxed previews block external requests."; }
 }
 
-document.addEventListener('click', e=>{
+document.addEventListener('click', async e=>{
   /* checkboxes */
   const cbx=e.target.closest('[data-cbx]');
   if(cbx){ e.stopPropagation(); const list=cbx.dataset.cbx==="proj"?PROJECTS:TASKS;
-    const it=list.find(x=>x.id===cbx.dataset.id); if(it){it.done=!it.done; mount(); (cbx.dataset.cbx==="proj"?saveProject:saveTask)(it);} return; }
+    const it=list.find(x=>x.id===cbx.dataset.id); if(it){it.done=!it.done; mount(); (cbx.dataset.cbx==="proj"?saveProject:saveTask)(it); sync(it.done?"complete":"reopen",{id:it.id});} return; }
   /* search result checkbox — toggle done inline (incl. un-completing) */
   const scbx=e.target.closest('[data-scbx]');
   if(scbx){ const tp=scbx.dataset.scbx; const list=tp==="proj"?PROJECTS:TASKS;
     const it=list.find(x=>x.id===scbx.dataset.id);
-    if(it){ it.done=!it.done; (tp==="proj"?saveProject:saveTask)(it);
+    if(it){ it.done=!it.done; (tp==="proj"?saveProject:saveTask)(it); sync(it.done?"complete":"reopen",{id:it.id});
       const rs=document.getElementById('searchResults'); if(rs) rs.innerHTML=renderSearchResults(); } return; }
+  /* manual sync with Todoist */
+  if(e.target.closest('#doSync')){ const b=e.target.closest('#doSync'); b.style.opacity=".4"; await syncPull(); b.style.opacity=""; mount(); return; }
   /* open / close search */
   if(e.target.closest('#openSearch')){ searchOpen=true; mount(); return; }
   if(e.target.closest('#closeSearch') || e.target.id==="searchOverlay"){ searchOpen=false; mount(); return; }
@@ -699,9 +713,17 @@ document.addEventListener('click', e=>{
   if(e.target.closest('#addSave')){
     const title=(document.getElementById('addTitle').value||'').trim(); if(!title){ const n=document.getElementById('addTitle'); if(n) n.focus(); return; }
     const area=document.getElementById('addAreaSel').value;
-    if(addDraft.type==='project'){ let len=parseInt(document.getElementById('addLen').value)||1; if(len<1) len=1; const p={id:'p'+Date.now(), area, title, start:addDraft.day, len, done:false}; PROJECTS.push(p); saveProject(p); }
-    else { const t={id:'t'+Date.now(), area, title, day:addDraft.day, done:false}; TASKS.push(t); saveTask(t); }
-    addOpen=false; addDraft=null; mount(); return;
+    const isProject=addDraft.type==='project';
+    let len=1; if(isProject){ len=parseInt(document.getElementById('addLen').value)||1; if(len<1) len=1; }
+    const day=addDraft.day;
+    addOpen=false; addDraft=null; mount();
+    const res=await sync("create",{title, area, isProject, due_date:ymd(day), deadline_date:isProject?ymd(day+len-1):undefined});
+    if(res && res.id){
+      if(isProject){ const p={id:res.id, area, title, start:day, len, done:false}; PROJECTS.push(p); saveProject(p); }
+      else { const t={id:res.id, area, title, day, done:false}; TASKS.push(t); saveTask(t); }
+      mount();
+    } else { console.error("create failed", res); alert("Couldn't add to Todoist — is sync set up? See console."); }
+    return;
   }
   /* Notion-style “+” to add a task/project on a date */
   const addBtn=e.target.closest('[data-add]');
@@ -834,23 +856,10 @@ async function loadData(){
   TASKS=(tRes.data||[]).map(t=>({id:t.id, area:t.area, title:t.title, day:t.day, done:t.done}));
 }
 
-async function seedDefaults(){
-  let i=0;
-  for(const [key,a] of Object.entries(DEFAULT_AREAS)){ await SB.from('areas').upsert({...areaToRow(key,a), sort_order:i++}); }
-  for(const p of DEFAULT_PROJECTS){ await SB.from('projects').upsert(projToRow(p)); }
-  for(const t of DEFAULT_TASKS){ await SB.from('tasks').upsert(taskToRow(t)); }
-}
-
+async function syncPull(){ const r=await sync("pull"); if(r && r.error) console.error("Todoist pull failed", r); await loadData(); }
 async function init(){
-  try{
-    await loadData();
-    if(Object.keys(AREAS).length===0){ await seedDefaults(); await loadData(); }
-  }catch(err){
-    console.error('Supabase unavailable — falling back to in-memory defaults.', err);
-    AREAS=JSON.parse(JSON.stringify(DEFAULT_AREAS));
-    PROJECTS=JSON.parse(JSON.stringify(DEFAULT_PROJECTS));
-    TASKS=JSON.parse(JSON.stringify(DEFAULT_TASKS));
-  }
+  try{ await syncPull(); }
+  catch(err){ console.error("Sync/load failed", err); try{ await loadData(); }catch(e){} }
   mount();
 }
 init();
