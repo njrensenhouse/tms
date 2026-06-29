@@ -144,11 +144,17 @@
 <body>
 <div class="app" id="app"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============ CONFIG ============ */
 /* Unsplash demo key. Visible in source — regenerate if this file is ever shared.
    Get one at https://unsplash.com/oauth/applications  (demo tier: 50 req/hour) */
 const UNSPLASH_KEY = "z_bRvqTwnPqwlbkrwwmnBx48zb4Cg_WfND65Lno4qco";
+
+/* Supabase: project URL + publishable key (safe to expose in frontend). */
+const SUPABASE_URL = "https://agicwlugswhimonyigbu.supabase.co";
+const SUPABASE_KEY = "sb_publishable_veJ6HgKn9CqCLORW-_ulLw_AHg5dRoI";
+const SB = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const ICON = {
   check:'<svg viewBox="0 0 12 12"><path d="M2 6.2l2.6 2.6L10 3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -179,7 +185,7 @@ function colorSetFromHex(hex){
   return p?{color:p[0],tint:p[1],ink:p[2]}:deriveColors(hex);
 }
 
-let AREAS = {
+const DEFAULT_AREAS = {
   medieval:{name:"Medieval Philosophy", graded:true, color:"#7F77DD", tint:"#EEEDFE", ink:"#3C3489", cover:"",
     note:"Aquinas on human desire (Summa I-II, qq.2-3). Final paper due Jul 9.",
     grades:[{name:"Paper 1",score:"88",weight:"30"},{name:"Midterm",score:"91",weight:"30"},{name:"Final paper",score:"",weight:"40"}]},
@@ -190,12 +196,12 @@ let AREAS = {
     note:"Ongoing. Finances, home, family.", grades:[]},
 };
 
-let PROJECTS = [
+const DEFAULT_PROJECTS = [
   {id:"p1", area:"medieval", title:"Aquinas paper", start:7, len:9, done:false},
   {id:"p2", area:"personal", title:"Camera install — wiring", start:0, len:5, done:false},
   {id:"p3", area:"thoughts", title:"Midterm essay", start:9, len:4, done:false},
 ];
-let TASKS = [
+const DEFAULT_TASKS = [
   {id:"t1", area:"personal", title:"Sunday slides", day:0, done:false},
   {id:"t2", area:"personal", title:"Pay water bill", day:0, done:true},
   {id:"t3", area:"medieval", title:"Label drops", day:2, done:false},
@@ -206,6 +212,9 @@ let TASKS = [
   {id:"t8", area:"medieval", title:"Draft intro", day:11, done:false},
   {id:"t9", area:"personal", title:"Record errand", day:15, done:false},
 ];
+
+/* live state — populated from Supabase on load */
+let AREAS={}, PROJECTS=[], TASKS=[];
 
 const DAYS=21, TODAY=0;
 const dayNums=[22,23,24,25,26,27,28,29,30,1,2,3,4,5,6,7,8,9,10,11,12];
@@ -481,13 +490,13 @@ document.addEventListener('click', e=>{
   /* checkboxes */
   const cbx=e.target.closest('[data-cbx]');
   if(cbx){ e.stopPropagation(); const list=cbx.dataset.cbx==="proj"?PROJECTS:TASKS;
-    const it=list.find(x=>x.id===cbx.dataset.id); if(it){it.done=!it.done; mount();} return; }
+    const it=list.find(x=>x.id===cbx.dataset.id); if(it){it.done=!it.done; mount(); (cbx.dataset.cbx==="proj"?saveProject:saveTask)(it);} return; }
   /* open area */
   const card=e.target.closest('[data-area]');
   if(card){ view={page:"area", area:card.dataset.area}; mount(); return; }
   /* nav */
-  if(e.target.closest('#toTimeline')){ syncGradesToModel(); view={page:"timeline",area:null}; mount(); return; }
-  if(e.target.closest('#toEdit')){ syncGradesToModel(); startEdit(view.area); return; }
+  if(e.target.closest('#toTimeline')){ const k=view.area; syncGradesToModel(); if(k)saveArea(k); view={page:"timeline",area:null}; mount(); return; }
+  if(e.target.closest('#toEdit')){ const k=view.area; syncGradesToModel(); if(k)saveArea(k); startEdit(view.area); return; }
   if(e.target.closest('#addArea')){ startAdd(); return; }
   if(e.target.closest('#fCancel')||e.target.closest('#fCancelTop')){
     if(view.page==="edit"){ view={page:"area",area:view.area}; } else { view={page:"timeline",area:null}; }
@@ -525,10 +534,12 @@ document.addEventListener('click', e=>{
     if(view.page==="add"){
       const key="a"+Date.now();
       AREAS[key]={...payload, grades:draft.graded?[{name:"",score:"",weight:""}]:[]};
+      saveArea(key);
       draft=null; view={page:"timeline",area:null}; mount(); return;
     } else {
       const a=AREAS[view.area]; Object.assign(a,payload);
       if(a.graded && !a.grades.length) a.grades=[{name:"",score:"",weight:""}];
+      saveArea(view.area);
       draft=null; view={page:"area",area:view.area}; mount(); return;
     }
   }
@@ -561,7 +572,52 @@ document.addEventListener('change', e=>{
 
 document.addEventListener('keydown', e=>{ if(e.key==="Enter" && e.target.id==="unsQ"){ e.preventDefault(); const q=e.target.value.trim(); if(q) unsplashSearch(q); }});
 
-mount();
+/* ---------- Supabase persistence ---------- */
+function areaToRow(key,a){return {id:key, name:a.name, graded:!!a.graded, color:a.color, tint:a.tint, ink:a.ink,
+  cover:a.cover||"", cover_x:a.coverX==null?50:a.coverX, cover_y:a.coverY==null?50:a.coverY, cover_zoom:a.coverZoom==null?100:a.coverZoom,
+  credit:a.credit||"", note:a.note||"", grades:a.grades||[]};}
+function projToRow(p){return {id:p.id, area:p.area, title:p.title, start_day:p.start, len:p.len, done:!!p.done};}
+function taskToRow(t){return {id:t.id, area:t.area, title:t.title, day:t.day, done:!!t.done};}
+
+async function saveArea(key){ if(!AREAS[key]) return; const {error}=await SB.from('areas').upsert(areaToRow(key,AREAS[key])); if(error) console.error('saveArea', error); }
+async function saveProject(p){ const {error}=await SB.from('projects').upsert(projToRow(p)); if(error) console.error('saveProject', error); }
+async function saveTask(t){ const {error}=await SB.from('tasks').upsert(taskToRow(t)); if(error) console.error('saveTask', error); }
+
+async function loadData(){
+  const [aRes,pRes,tRes]=await Promise.all([
+    SB.from('areas').select('*').order('sort_order').order('created_at'),
+    SB.from('projects').select('*').order('created_at'),
+    SB.from('tasks').select('*').order('created_at'),
+  ]);
+  if(aRes.error) throw aRes.error; if(pRes.error) throw pRes.error; if(tRes.error) throw tRes.error;
+  AREAS={};
+  (aRes.data||[]).forEach(a=>{ AREAS[a.id]={name:a.name, graded:a.graded, color:a.color, tint:a.tint, ink:a.ink,
+    cover:a.cover||"", coverX:a.cover_x, coverY:a.cover_y, coverZoom:a.cover_zoom, credit:a.credit||"", note:a.note||"",
+    grades:Array.isArray(a.grades)?a.grades:[]}; });
+  PROJECTS=(pRes.data||[]).map(p=>({id:p.id, area:p.area, title:p.title, start:p.start_day, len:p.len, done:p.done}));
+  TASKS=(tRes.data||[]).map(t=>({id:t.id, area:t.area, title:t.title, day:t.day, done:t.done}));
+}
+
+async function seedDefaults(){
+  let i=0;
+  for(const [key,a] of Object.entries(DEFAULT_AREAS)){ await SB.from('areas').upsert({...areaToRow(key,a), sort_order:i++}); }
+  for(const p of DEFAULT_PROJECTS){ await SB.from('projects').upsert(projToRow(p)); }
+  for(const t of DEFAULT_TASKS){ await SB.from('tasks').upsert(taskToRow(t)); }
+}
+
+async function init(){
+  try{
+    await loadData();
+    if(Object.keys(AREAS).length===0){ await seedDefaults(); await loadData(); }
+  }catch(err){
+    console.error('Supabase unavailable — falling back to in-memory defaults.', err);
+    AREAS=JSON.parse(JSON.stringify(DEFAULT_AREAS));
+    PROJECTS=JSON.parse(JSON.stringify(DEFAULT_PROJECTS));
+    TASKS=JSON.parse(JSON.stringify(DEFAULT_TASKS));
+  }
+  mount();
+}
+init();
 </script>
 </body>
 </html>
