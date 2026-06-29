@@ -185,6 +185,10 @@
   .cell-add:hover{ opacity:1; border-color:var(--muted); color:var(--ink); }
   .proj-add{ position:absolute; inset:0; display:grid; z-index:0; }
   .proj-add .slot{ display:flex; align-items:flex-start; justify-content:center; }
+  /* draggable chips + inline title editing */
+  .chip{ touch-action:none; user-select:none; }
+  .lbl[data-edit]{ cursor:text; }
+  .lbl[contenteditable="true"]{ outline:1px solid currentColor; border-radius:4px; padding:0 2px; user-select:text; white-space:normal; }
 
   @media (max-width:820px){
     .main{grid-template-columns:1fr;}
@@ -306,6 +310,7 @@ let tlLeft=null;            // remembered horizontal scroll position
 let searchOpen=false, searchQ="";
 let settingsOpen=false;
 let addOpen=false, addDraft=null;   // quick-add (click a date)
+let editing=null, suppressClickUntil=0;   // inline title edit + chip drag
 
 let view={page:"timeline", area:null};
 /* working draft used by the shared add/edit form */
@@ -325,7 +330,7 @@ function renderTimeline(){
     const a=AREAS[p.area];
     return `<div class="proj-row"><div class="bar" style="left:${(p.start-firstIdx)*COLW}px; width:${p.len*COLW-5}px; background:${a.tint}; border-color:${a.color}; color:${a.ink};">
       <span class="bar-handle l" data-resize="l" data-id="${p.id}"></span>
-      <span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span><span class="lbl">${p.title}</span>
+      <span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span><span class="lbl" data-edit data-kind="proj" data-id="${p.id}">${p.title}</span>
       <span class="bar-handle r" data-resize="r" data-id="${p.id}"></span></div></div>`;
   }).join("");
   let dayCols="";
@@ -333,8 +338,8 @@ function renderTimeline(){
     const idx=firstIdx+d;
     const items=TASKS.filter(t=>t.day===idx && !t.done && AREAS[t.area]).map(t=>{
       const a=AREAS[t.area];
-      return `<div class="chip" style="background:${a.tint}; border-color:${a.color}; color:${a.ink};">
-        <span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span><span class="lbl">${t.title}</span></div>`;
+      return `<div class="chip" data-task-id="${t.id}" style="background:${a.tint}; border-color:${a.color}; color:${a.ink};">
+        <span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span><span class="lbl" data-edit data-kind="task" data-id="${t.id}">${t.title}</span></div>`;
     }).join("");
     dayCols+=`<div class="day-col" data-day="${idx}">${items}<button class="cell-add" data-add="task" data-day="${idx}" aria-label="Add task">${ICON.plus}</button></div>`;
   }
@@ -565,6 +570,43 @@ function initBars(){
   });
 }
 
+/* drag a task chip horizontally to change its date */
+function initChips(){
+  document.querySelectorAll('.chip[data-task-id]').forEach(ch=>{
+    ch.addEventListener('pointerdown', ev=>{
+      if(editing) return; if(ev.target.closest('.cbx')) return;
+      const id=ch.dataset.taskId; const t=TASKS.find(x=>x.id===id); if(!t) return;
+      const startX=ev.clientX; let moved=false;
+      try{ ch.setPointerCapture(ev.pointerId); }catch(e){}
+      const move=mev=>{ const dx=mev.clientX-startX; if(!moved && Math.abs(dx)>4){ moved=true; ch.style.position="relative"; ch.style.zIndex="5"; } if(moved){ ch.style.transform=`translateX(${dx}px)`; } };
+      const up=mev=>{ ch.removeEventListener('pointermove',move); ch.removeEventListener('pointerup',up);
+        ch.style.transform=""; ch.style.zIndex=""; ch.style.position="";
+        if(moved){ const dd=Math.round((mev.clientX-startX)/COLW); suppressClickUntil=Date.now()+300; if(dd!==0){ t.day=t.day+dd; saveTask(t); sync("update",{id, due_date:ymd(t.day)}); mount(); } }
+      };
+      ch.addEventListener('pointermove',move); ch.addEventListener('pointerup',up);
+    });
+  });
+}
+
+/* inline title editing (click a title on the timeline) */
+function startTitleEdit(el){
+  if(editing) return;
+  editing={el, kind:el.dataset.kind, id:el.dataset.id, orig:el.textContent};
+  el.setAttribute('contenteditable','true'); el.spellcheck=false; el.focus();
+  const r=document.createRange(); r.selectNodeContents(el); const s=getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+function commitTitleEdit(cancel){
+  if(!editing) return;
+  const {el, kind, id, orig}=editing; editing=null;
+  el.removeAttribute('contenteditable');
+  let val=(el.textContent||"").replace(/\s+/g," ").trim();
+  if(cancel || !val){ el.textContent=orig; return; }
+  el.textContent=val;
+  if(val===(orig||"").trim()) return;
+  const list=kind==="proj"?PROJECTS:TASKS; const it=list.find(x=>x.id===id);
+  if(it){ it.title=val; (kind==="proj"?saveProject:saveTask)(it); sync("update",{id, title:val}); }
+}
+
 function renderSearch(){
   return `<div class="search-overlay" id="searchOverlay">
     <div class="search-box">
@@ -595,6 +637,7 @@ function initTimeline(){
     else if(sc.scrollLeft < COLW*4){ win.start-=28; win.weeks+=4; tlLeft+=28*COLW; mount(); }
   });
   initBars();
+  initChips();
 }
 
 function mount(){
@@ -698,6 +741,9 @@ document.addEventListener('click', async e=>{
     const it=list.find(x=>x.id===scbx.dataset.id);
     if(it){ it.done=!it.done; (tp==="proj"?saveProject:saveTask)(it); sync(it.done?"complete":"reopen",{id:it.id});
       const rs=document.getElementById('searchResults'); if(rs) rs.innerHTML=renderSearchResults(); } return; }
+  /* inline title edit — click a task/project title on the timeline */
+  const lbl=e.target.closest('.lbl[data-edit]');
+  if(lbl){ if(Date.now()<suppressClickUntil) return; e.stopPropagation(); startTitleEdit(lbl); return; }
   /* manual sync with Todoist */
   if(e.target.closest('#doSync')){ const b=e.target.closest('#doSync'); b.style.opacity=".4"; await syncPull(); b.style.opacity=""; mount(); return; }
   /* open / close search */
@@ -817,10 +863,12 @@ document.addEventListener('change', e=>{
 });
 
 document.addEventListener('keydown', e=>{
+  if(editing && e.target===editing.el){ if(e.key==="Enter"){ e.preventDefault(); commitTitleEdit(false); } else if(e.key==="Escape"){ e.preventDefault(); commitTitleEdit(true); } return; }
   if(e.key==="Enter" && e.target.id==="unsQ"){ e.preventDefault(); const q=e.target.value.trim(); if(q) unsplashSearch(q); }
   if(e.key==="Enter" && e.target.id==="addTitle"){ const b=document.getElementById('addSave'); if(b) b.click(); }
   if(e.key==="Escape"){ if(addOpen){ addOpen=false; addDraft=null; mount(); } else if(settingsOpen){ settingsOpen=false; mount(); } else if(searchOpen){ searchOpen=false; mount(); } }
 });
+document.addEventListener('focusout', e=>{ if(editing && e.target===editing.el) commitTitleEdit(false); });
 
 /* ---------- Supabase persistence ---------- */
 function areaToRow(key,a){return {id:key, name:a.name, graded:!!a.graded, color:a.color, tint:a.tint, ink:a.ink,
@@ -854,6 +902,13 @@ async function loadData(){
     grades:Array.isArray(a.grades)?a.grades:[]}; });
   PROJECTS=(pRes.data||[]).map(p=>({id:p.id, area:p.area, title:p.title, start:p.start_day, len:p.len, done:p.done}));
   TASKS=(tRes.data||[]).map(t=>({id:t.id, area:t.area, title:t.title, day:t.day, done:t.done}));
+}
+
+async function seedDefaults(){
+  let i=0;
+  for(const [key,a] of Object.entries(DEFAULT_AREAS)){ await SB.from('areas').upsert({...areaToRow(key,a), sort_order:i++}); }
+  for(const p of DEFAULT_PROJECTS){ await SB.from('projects').upsert(projToRow(p)); }
+  for(const t of DEFAULT_TASKS){ await SB.from('tasks').upsert(taskToRow(t)); }
 }
 
 async function syncPull(){ const r=await sync("pull"); if(r && r.error) console.error("Todoist pull failed", r); await loadData(); }
