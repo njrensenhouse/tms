@@ -81,7 +81,7 @@
   .area-card{background:var(--surface); border:0.5px solid var(--line); border-radius:var(--radius-lg);
     overflow:hidden; cursor:pointer; transition:border-color .12s;}
   .area-card:hover{border-color:var(--line2);}
-  .area-cover{height:110px; background-size:cover; background-position:center;}
+  .area-cover{height:74px; background-size:cover; background-position:center;}
   .area-meta{padding:10px 12px;}
   .area-meta .nm{font-size:14.5px; font-weight:500;}
 
@@ -186,15 +186,33 @@
   .proj-add{ position:absolute; inset:0; display:grid; z-index:0; }
   .proj-add .slot{ display:flex; align-items:flex-start; justify-content:center; }
   /* draggable chips + inline title editing */
-  .chip{ touch-action:none; user-select:none; }
+  .chip{ touch-action:none; user-select:none; flex-direction:column; align-items:stretch; gap:3px; }
+  .chip-top{ display:flex; align-items:center; justify-content:space-between; gap:6px; }
   .lbl[data-edit]{ cursor:text; }
   .lbl[contenteditable="true"]{ outline:1px solid currentColor; border-radius:4px; padding:0 2px; user-select:text; white-space:normal; }
+  .bar .lbl{ min-width:0; flex:0 1 auto; }
+  .edit-btn{ flex:0 0 auto; width:16px; height:16px; padding:0; border:none; background:none; color:currentColor; opacity:.32; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .edit-btn:hover{ opacity:1; }
+  .edit-btn svg{ width:12px; height:12px; }
+
+  /* unscheduled scheduler */
+  .sched-btn{ position:relative; }
+  .badge{ position:absolute; right:-3px; bottom:-3px; min-width:15px; height:15px; padding:0 3px; border-radius:8px; background:#D4537E; color:#fff; font-size:9px; font-weight:600; line-height:15px; text-align:center; }
+  .badge[hidden]{ display:none; }
+  .sched-drawer{ position:fixed; left:52px; top:0; bottom:0; width:300px; max-width:80vw; background:var(--surface); border-right:0.5px solid var(--line2); box-shadow:6px 0 24px rgba(0,0,0,.28); z-index:90; display:flex; flex-direction:column; }
+  .sched-head{ display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:0.5px solid var(--line); font-weight:500; }
+  .sched-list{ overflow:auto; flex:1 1 auto; padding:4px 0; }
+  .sched-item{ display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:0.5px solid var(--line); cursor:grab; }
+  .sched-item:active{ cursor:grabbing; }
+  .sched-item .sched-date{ width:122px; flex:0 0 auto; }
+  .sched-hint{ padding:10px 14px; font-size:11px; color:var(--faint); border-top:0.5px solid var(--line); }
+  .sched-ghost{ position:fixed; z-index:200; pointer-events:none; background:var(--surface); border:0.5px solid var(--line2); border-radius:8px; padding:5px 9px; font-size:12px; box-shadow:0 6px 20px rgba(0,0,0,.3); }
 
   @media (max-width:820px){
     .main{grid-template-columns:1fr;}
     .rail{order:-1;}
     .gallery{flex-direction:row; overflow-x:auto;}
-    .area-card{flex:0 0 200px;}
+    .area-card{flex:0 0 160px;}
     .uns-grid{grid-template-columns:repeat(3,1fr);}
   }
 </style>
@@ -296,7 +314,9 @@ const DEFAULT_TASKS = [
 let AREAS={}, PROJECTS=[], TASKS=[];
 
 /* ---- date model: day index 0 == 2026-06-22; timeline scrolls infinitely ---- */
-const MS=86400000, COLW=54;
+const MS=86400000;
+let COLW=54; try{ COLW=parseInt(localStorage.getItem('tms_colw'))||54; }catch(e){}
+function persistColw(){ try{ localStorage.setItem('tms_colw', String(COLW)); }catch(e){} }
 const EPOCH=new Date(2026,5,22);
 const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function dateForIndex(i){ return new Date(EPOCH.getTime()+i*MS); }
@@ -311,6 +331,8 @@ let searchOpen=false, searchQ="";
 let settingsOpen=false;
 let addOpen=false, addDraft=null;   // quick-add (click a date)
 let editing=null, suppressClickUntil=0;   // inline title edit + chip drag
+let editOpen=false, editDraft=null;        // edit-item popup
+let schedOpen=false, UNSCHED=[];           // undated-item scheduler
 
 let view={page:"timeline", area:null};
 /* working draft used by the shared add/edit form */
@@ -330,7 +352,7 @@ function renderTimeline(){
     const a=AREAS[p.area];
     return `<div class="proj-row"><div class="bar" style="left:${(p.start-firstIdx)*COLW}px; width:${p.len*COLW-5}px; background:${a.tint}; border-color:${a.color}; color:${a.ink};">
       <span class="bar-handle l" data-resize="l" data-id="${p.id}"></span>
-      <span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span><span class="lbl" data-edit data-kind="proj" data-id="${p.id}">${p.title}</span>
+      <span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span><span class="lbl" data-edit data-kind="proj" data-id="${p.id}">${p.title}</span><button class="edit-btn" data-editbtn data-kind="proj" data-id="${p.id}" aria-label="Edit">${ICON.pencil}</button>
       <span class="bar-handle r" data-resize="r" data-id="${p.id}"></span></div></div>`;
   }).join("");
   let dayCols="";
@@ -339,7 +361,8 @@ function renderTimeline(){
     const items=TASKS.filter(t=>t.day===idx && !t.done && AREAS[t.area]).map(t=>{
       const a=AREAS[t.area];
       return `<div class="chip" data-task-id="${t.id}" style="background:${a.tint}; border-color:${a.color}; color:${a.ink};">
-        <span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span><span class="lbl" data-edit data-kind="task" data-id="${t.id}">${t.title}</span></div>`;
+        <div class="chip-top"><span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span><button class="edit-btn" data-editbtn data-kind="task" data-id="${t.id}" aria-label="Edit">${ICON.pencil}</button></div>
+        <span class="lbl" data-edit data-kind="task" data-id="${t.id}">${t.title}</span></div>`;
     }).join("");
     dayCols+=`<div class="day-col" data-day="${idx}">${items}<button class="cell-add" data-add="task" data-day="${idx}" aria-label="Add task">${ICON.plus}</button></div>`;
   }
@@ -502,11 +525,73 @@ function topbar(){
 }
 
 function sidebar(){
+  const n=UNSCHED.length;
   return `<div class="sidebar">
+    <button class="side-btn sched-btn" id="openSched" aria-label="Schedule undated items">${ICON.plus}<span class="badge" ${n?'':'hidden'}>${n}</span></button>
     <button class="side-btn" id="openSearch" aria-label="Search">${ICON.search}</button>
     <button class="side-btn" id="doSync" aria-label="Sync with Todoist">${ICON.sync}</button>
     <button class="side-btn side-bottom" id="openSettings" aria-label="Settings">${ICON.gear}</button>
   </div>`;
+}
+
+function idxOfStr(s){ if(!s) return TODAY; const [y,m,d]=s.split('-').map(Number); return indexForDate(new Date(y,m-1,d)); }
+
+/* ---- edit-item popup (title / dates / task<->project) ---- */
+function openEditItem(kind, id){
+  const list=kind==="proj"?PROJECTS:TASKS; const it=list.find(x=>x.id===id); if(!it) return;
+  editDraft = kind==="proj" ? {id, type:"project", title:it.title, start:it.start, len:it.len}
+                            : {id, type:"task", title:it.title, start:it.day, len:1};
+  editOpen=true; mount();
+}
+function captureEdit(){
+  if(!editDraft) return;
+  const ti=document.getElementById('editTitle'); if(ti) editDraft.title=ti.value;
+  const st=document.getElementById('editStart'); if(st && st.value) editDraft.start=idxOfStr(st.value);
+  const en=document.getElementById('editEnd'); if(en && en.value){ const e=idxOfStr(en.value); editDraft.len=Math.max(1, e-editDraft.start+1); }
+}
+function renderEdit(){
+  const d=editDraft; const isP=d.type==="project";
+  return `<div class="search-overlay" id="editOverlay"><div class="search-box" style="width:min(440px,92vw);">
+    <div class="search-top" style="justify-content:space-between;"><span style="color:var(--ink); font-weight:500;">Edit ${isP?'project':'task'}</span><button class="txt-btn" id="editCancel">Cancel</button></div>
+    <div style="padding:16px 18px;">
+      <div class="seg"><button class="tab ${!isP?'on':''}" data-edittype="task">Task</button><button class="tab ${isP?'on':''}" data-edittype="project">Project</button></div>
+      <div class="field"><label>Title</label><input type="text" id="editTitle" value="${(d.title||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>${isP?'Start date':'Date'}</label><input type="date" id="editStart" value="${ymd(d.start)}"></div>
+      ${isP?`<div class="field"><label>End date</label><input type="date" id="editEnd" value="${ymd(d.start+(d.len>0?d.len-1:0))}"></div>`:''}
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;"><button class="danger-btn" id="editDelete" style="width:auto; margin:0; padding:8px 12px;">Delete</button><button class="txt-btn primary" id="editSave">Save</button></div>
+    </div>
+  </div></div>`;
+}
+
+/* ---- undated-item scheduler ---- */
+const SCHED_PROJ_LEN=3;
+async function scheduleUnsched(id, idx){
+  const u=UNSCHED.find(x=>x.id===id); if(!u) return;
+  await sync("update",{id, due_date:ymd(idx), deadline_date:u.isProject?ymd(idx+SCHED_PROJ_LEN-1):undefined});
+  await syncPull(); mount();
+}
+function renderSched(){
+  const items = UNSCHED.length ? UNSCHED.map(u=>{ const a=AREAS[u.area]||{};
+    return `<div class="sched-item" data-usid="${u.id}"><span class="sr-dot" style="background:${a.color||'#888'}"></span><div class="sr-main"><div class="sr-title">${u.title}</div><div class="sr-meta">${u.isProject?'Project':'Task'} · ${a.name||'—'}</div></div><input type="date" class="sched-date" data-usid="${u.id}"></div>`; }).join("")
+    : `<div class="sr-empty">Nothing unscheduled.</div>`;
+  return `<div class="sched-drawer" id="schedDrawer">
+    <div class="sched-head"><span>Unscheduled · ${UNSCHED.length}</span><button class="txt-btn" id="closeSched">Close</button></div>
+    <div class="sched-list">${items}</div>
+    <div class="sched-hint">Drag an item onto a day on the timeline, or pick a date.</div>
+  </div>`;
+}
+function initSched(){
+  document.querySelectorAll('.sched-item').forEach(el=>{
+    el.addEventListener('pointerdown', ev=>{
+      if(ev.target.closest('.sched-date')) return;
+      const id=el.dataset.usid; const sx=ev.clientX, sy=ev.clientY; let ghost=null;
+      const move=mev=>{ if(!ghost && (Math.abs(mev.clientX-sx)>5||Math.abs(mev.clientY-sy)>5)){ ghost=document.createElement('div'); ghost.className='sched-ghost'; ghost.textContent=el.querySelector('.sr-title').textContent; document.body.appendChild(ghost); }
+        if(ghost){ ghost.style.left=(mev.clientX+10)+'px'; ghost.style.top=(mev.clientY+10)+'px'; } };
+      const up=mev=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
+        if(ghost){ ghost.remove(); const tgt=document.elementFromPoint(mev.clientX,mev.clientY); const dayEl=tgt&&tgt.closest&&tgt.closest('[data-day]'); if(dayEl) scheduleUnsched(id, parseInt(dayEl.dataset.day,10)); } };
+      document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+    });
+  });
 }
 
 function renderSettings(){
@@ -545,7 +630,7 @@ function renderAdd(){
 }
 function openAdd(day, type){
   const keys=Object.keys(AREAS);
-  if(!keys.length){ alert('No areas yet — add a project in Todoist and Sync, or wait for sync to finish.'); return; }
+  if(!keys.length){ alert('Add an area first (+ in the Areas rail).'); return; }
   addDraft={type:(type==='project'?'project':'task'), title:'', area:keys[0], day, len:3};
   addOpen=true; mount();
 }
@@ -574,7 +659,7 @@ function initBars(){
 function initChips(){
   document.querySelectorAll('.chip[data-task-id]').forEach(ch=>{
     ch.addEventListener('pointerdown', ev=>{
-      if(editing) return; if(ev.target.closest('.cbx')) return;
+      if(editing) return; if(ev.target.closest('.cbx') || ev.target.closest('.edit-btn')) return;
       const id=ch.dataset.taskId; const t=TASKS.find(x=>x.id===id); if(!t) return;
       const startX=ev.clientX; let moved=false;
       try{ ch.setPointerCapture(ev.pointerId); }catch(e){}
@@ -646,12 +731,14 @@ function mount(){
   if(view.page==="timeline") body=renderTimeline();
   else if(view.page==="area") body=renderArea(view.area);
   else body=renderAreaForm(view.page); // add | edit
-  app.innerHTML=sidebar()+'<div class="content">'+topbar()+body+'</div>'+(searchOpen?renderSearch():"")+(settingsOpen?renderSettings():"")+(addOpen?renderAdd():"");
+  app.innerHTML=sidebar()+'<div class="content">'+topbar()+body+'</div>'+(searchOpen?renderSearch():"")+(settingsOpen?renderSettings():"")+(addOpen?renderAdd():"")+(editOpen?renderEdit():"")+(schedOpen?renderSched():"");
   if(view.page==="area") recalcGrade();
   if((view.page==="add"||view.page==="edit") && draft && draft.cover) initCrop();
   if(view.page==="timeline") initTimeline();
+  if(schedOpen) initSched();
   if(searchOpen){ const si=document.getElementById('searchInput'); if(si){ si.focus(); try{ si.setSelectionRange(si.value.length,si.value.length); }catch(e){} } }
   if(addOpen){ const ti=document.getElementById('addTitle'); if(ti) ti.focus(); }
+  if(editOpen){ const ti=document.getElementById('editTitle'); if(ti) ti.focus(); }
 }
 
 /* drag-to-pan + wheel/pinch-to-zoom on the cover preview */
@@ -741,9 +828,26 @@ document.addEventListener('click', async e=>{
     const it=list.find(x=>x.id===scbx.dataset.id);
     if(it){ it.done=!it.done; (tp==="proj"?saveProject:saveTask)(it); sync(it.done?"complete":"reopen",{id:it.id});
       const rs=document.getElementById('searchResults'); if(rs) rs.innerHTML=renderSearchResults(); } return; }
+  /* edit button → edit popup */
+  const eb=e.target.closest('[data-editbtn]');
+  if(eb){ e.stopPropagation(); openEditItem(eb.dataset.kind, eb.dataset.id); return; }
   /* inline title edit — click a task/project title on the timeline */
   const lbl=e.target.closest('.lbl[data-edit]');
   if(lbl){ if(Date.now()<suppressClickUntil) return; e.stopPropagation(); startTitleEdit(lbl); return; }
+  /* schedule undated items */
+  if(e.target.closest('#openSched')){ schedOpen=true; mount(); return; }
+  if(e.target.closest('#closeSched')){ schedOpen=false; mount(); return; }
+  /* edit popup actions */
+  const editTypeBtn=e.target.closest('[data-edittype]');
+  if(editTypeBtn){ captureEdit(); editDraft.type=editTypeBtn.dataset.edittype; if(editDraft.type==='project' && (!editDraft.len||editDraft.len<1)) editDraft.len=3; mount(); return; }
+  if(e.target.closest('#editCancel') || e.target.id==="editOverlay"){ editOpen=false; editDraft=null; mount(); return; }
+  if(e.target.closest('#editDelete')){ const id=editDraft.id; if(confirm('Delete this item? It will also be deleted in Todoist.')){ editOpen=false; editDraft=null; mount(); await sync('delete',{id}); await syncPull(); mount(); } return; }
+  if(e.target.closest('#editSave')){
+    captureEdit(); const {id,type,title,start,len}=editDraft; const isP=type==='project';
+    editOpen=false; editDraft=null; mount();
+    await sync('update',{id, title, due_date:ymd(start), deadline_date:isP?ymd(start+(len>0?len-1:0)):undefined, set_project:isP});
+    await syncPull(); mount(); return;
+  }
   /* manual sync with Todoist */
   if(e.target.closest('#doSync')){ const b=e.target.closest('#doSync'); b.style.opacity=".4"; await syncPull(); b.style.opacity=""; mount(); return; }
   /* open / close search */
@@ -854,6 +958,7 @@ document.addEventListener('input', e=>{
 });
 
 document.addEventListener('change', e=>{
+  if(e.target.classList && e.target.classList.contains('sched-date')){ if(e.target.value) scheduleUnsched(e.target.dataset.usid, idxOfStr(e.target.value)); return; }
   if(e.target.id==="themeToggle"){ applyTheme(e.target.checked?"dark":"light"); return; }
   if(e.target.id==="fileUp"){ const f=e.target.files[0]; if(!f) return;
     const reader=new FileReader();
@@ -866,9 +971,29 @@ document.addEventListener('keydown', e=>{
   if(editing && e.target===editing.el){ if(e.key==="Enter"){ e.preventDefault(); commitTitleEdit(false); } else if(e.key==="Escape"){ e.preventDefault(); commitTitleEdit(true); } return; }
   if(e.key==="Enter" && e.target.id==="unsQ"){ e.preventDefault(); const q=e.target.value.trim(); if(q) unsplashSearch(q); }
   if(e.key==="Enter" && e.target.id==="addTitle"){ const b=document.getElementById('addSave'); if(b) b.click(); }
-  if(e.key==="Escape"){ if(addOpen){ addOpen=false; addDraft=null; mount(); } else if(settingsOpen){ settingsOpen=false; mount(); } else if(searchOpen){ searchOpen=false; mount(); } }
+  if(e.key==="Enter" && e.target.id==="editTitle"){ const b=document.getElementById('editSave'); if(b) b.click(); }
+  if(e.key==="Escape"){ if(editOpen){ editOpen=false; editDraft=null; mount(); } else if(addOpen){ addOpen=false; addDraft=null; mount(); } else if(schedOpen){ schedOpen=false; mount(); } else if(settingsOpen){ settingsOpen=false; mount(); } else if(searchOpen){ searchOpen=false; mount(); } }
 });
 document.addEventListener('focusout', e=>{ if(editing && e.target===editing.el) commitTitleEdit(false); });
+
+/* ---- pinch / ctrl-wheel to zoom the timeline (day-column width) ---- */
+let pinchBase=0, pinchColw=COLW, pinchRAF=0;
+document.addEventListener('touchmove', e=>{
+  if(e.touches.length!==2 || view.page!=='timeline' || editOpen || addOpen || schedOpen) return;
+  e.preventDefault();
+  const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY, dist=Math.hypot(dx,dy);
+  if(pinchBase===0){ pinchBase=dist; pinchColw=COLW; return; }
+  const nc=Math.max(30,Math.min(120, Math.round(pinchColw*dist/pinchBase)));
+  if(nc!==COLW){ COLW=nc; if(!pinchRAF) pinchRAF=requestAnimationFrame(()=>{ pinchRAF=0; persistColw(); if(view.page==='timeline') mount(); }); }
+}, {passive:false});
+document.addEventListener('touchend', e=>{ if(e.touches.length<2) pinchBase=0; });
+document.addEventListener('wheel', e=>{
+  if((e.ctrlKey||e.metaKey) && e.target.closest && e.target.closest('.tl-scroll')){
+    e.preventDefault();
+    const nc=Math.max(30,Math.min(120, Math.round(COLW - Math.sign(e.deltaY)*4)));
+    if(nc!==COLW){ COLW=nc; persistColw(); mount(); }
+  }
+}, {passive:false});
 
 /* ---------- Supabase persistence ---------- */
 function areaToRow(key,a){return {id:key, name:a.name, graded:!!a.graded, color:a.color, tint:a.tint, ink:a.ink,
@@ -902,6 +1027,7 @@ async function loadData(){
     grades:Array.isArray(a.grades)?a.grades:[]}; });
   PROJECTS=(pRes.data||[]).map(p=>({id:p.id, area:p.area, title:p.title, start:p.start_day, len:p.len, done:p.done}));
   TASKS=(tRes.data||[]).map(t=>({id:t.id, area:t.area, title:t.title, day:t.day, done:t.done}));
+  try{ const uRes=await SB.from('unscheduled').select('*').order('created_at'); UNSCHED=(uRes.data||[]).map(u=>({id:u.id, area:u.area, title:u.title, isProject:u.is_project})); }catch(e){ UNSCHED=[]; }
 }
 
 async function seedDefaults(){
