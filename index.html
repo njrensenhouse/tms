@@ -9,7 +9,7 @@
     /* dark theme (default) */
     --bg:#1A1815; --surface:#242220; --ink:#ECE9E2; --muted:#A39E95; --faint:#736E66;
     --line:rgba(255,255,255,0.10); --line2:rgba(255,255,255,0.16);
-    --today:rgba(85,160,235,0.16); --today-ink:#7FB2F0; --primary-ink:#34C88C;
+    --today:rgba(255,255,255,0.07); --today-ink:#C8C3BA; --primary-ink:#34C88C;
     --radius:10px; --radius-lg:14px;
     --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
     --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
@@ -17,7 +17,7 @@
   :root[data-theme="light"]{
     --bg:#FBFAF7; --surface:#FFFFFF; --ink:#23211C; --muted:#6B6862; --faint:#9A968E;
     --line:rgba(35,33,28,0.10); --line2:rgba(35,33,28,0.18);
-    --today:rgba(55,138,221,0.07); --today-ink:#185FA5; --primary-ink:#0F6E56;
+    --today:rgba(35,33,28,0.055); --today-ink:#6B6862; --primary-ink:#0F6E56;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{margin:0; height:100%;}
@@ -28,7 +28,7 @@
   .side-btn{width:36px; height:36px; border-radius:9px; border:0.5px solid var(--line2); background:var(--surface); cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--muted);}
   .side-btn:active{transform:scale(.96);}
   .side-btn svg{width:18px; height:18px;}
-  .content{flex:1 1 auto; display:flex; flex-direction:column; min-width:0; height:100%;}
+  .content{flex:1 1 auto; display:flex; flex-direction:column; min-width:0; height:100%; position:relative;}
 
   header.topbar{flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
     padding:16px 22px 12px; border-bottom:0.5px solid var(--line); min-height:18px;}
@@ -74,11 +74,20 @@
   .cbx.on{opacity:1;} .cbx.on svg{display:block;}
   .bar .cbx{margin-top:0;}
 
-  .rail{display:flex; flex-direction:column; min-height:0;}
-  .rail-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; padding-left:2px;}
+  .rail{display:flex; flex-direction:column; min-height:0; overflow:hidden;}
+  .rail-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; padding-left:2px; flex:0 0 auto;}
   .rail-head .t{font-size:13px; font-weight:500; color:var(--muted);}
-  .gallery{display:flex; flex-direction:column; gap:11px; overflow:auto;}
-  .area-card{background:var(--surface); border:0.5px solid var(--line); border-radius:var(--radius-lg);
+  .rail-actions{display:flex; align-items:center; gap:6px;}
+  .gallery{display:flex; flex-direction:column; gap:11px; overflow-y:auto; flex:1 1 auto; min-height:0; padding-right:3px;}
+  /* draggable divider between timeline and areas rail */
+  .divider{cursor:ew-resize; position:relative; align-self:stretch; touch-action:none;}
+  .divider::after{content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:3px; height:34px; background:var(--line2); border-radius:3px; transition:background .12s, height .12s;}
+  .divider:hover::after, .divider.active::after{background:var(--muted); height:60px;}
+  .rail-expand{position:absolute; top:18px; right:14px; z-index:20; width:32px; height:32px; border-radius:9px;
+    border:0.5px solid var(--line2); background:var(--surface); color:var(--muted); cursor:pointer; display:flex; align-items:center; justify-content:center;}
+  .rail-expand:active{transform:scale(.96);}
+  .rail-expand svg{width:17px; height:17px;}
+  .area-card{flex:0 0 auto; background:var(--surface); border:0.5px solid var(--line); border-radius:var(--radius-lg);
     overflow:hidden; cursor:pointer; transition:border-color .12s;}
   .area-card:hover{border-color:var(--line2);}
   .area-cover{height:74px; background-size:cover; background-position:center;}
@@ -132,7 +141,7 @@
   .crop-controls{display:flex; align-items:center; gap:12px; margin-bottom:12px;}
   .tabs{display:flex; gap:6px; margin-bottom:12px;}
   .tab{font:inherit; font-size:13px; padding:6px 12px; border-radius:8px; border:0.5px solid var(--line2); background:var(--surface); color:var(--muted); cursor:pointer;}
-  .tab.on{background:var(--ink); color:var(--bg); border-color:var(--ink);}
+  .tab.on{background:var(--ink); color:#fff; border-color:var(--ink);}
   .uns-search{display:flex; gap:8px; margin-bottom:10px;}
   .uns-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:6px;}
   .uns-thumb{aspect-ratio:1; border-radius:8px; background-size:cover; background-position:center; cursor:pointer; border:2px solid transparent; background-color:var(--bg);}
@@ -143,8 +152,8 @@
   .overlay{position:absolute; inset:0; background:rgba(35,33,28,.4); display:flex; align-items:center; justify-content:center; z-index:50;}
 
   /* search overlay */
-  .search-overlay{position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:flex-start; justify-content:center; z-index:100; padding-top:8vh;}
-  .search-box{width:min(620px,92vw); max-height:80vh; background:var(--surface); border:0.5px solid var(--line2); border-radius:var(--radius-lg); box-shadow:0 12px 40px rgba(0,0,0,.35); display:flex; flex-direction:column; overflow:hidden;}
+  .search-overlay{position:fixed; inset:0; background:rgba(35,33,28,.35); display:flex; align-items:flex-start; justify-content:center; z-index:100; padding-top:8vh;}
+  .search-box{width:min(620px,92vw); max-height:80vh; background:var(--surface); border:0.5px solid var(--line2); border-radius:var(--radius-lg); box-shadow:0 12px 40px rgba(0,0,0,.18); display:flex; flex-direction:column; overflow:hidden;}
   .search-top{display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:0.5px solid var(--line); color:var(--faint);}
   .search-top svg{width:18px; height:18px; flex:0 0 auto;}
   .search-top input{flex:1; font:inherit; font-size:15px; border:none; outline:none; background:transparent; color:var(--ink);}
@@ -258,6 +267,8 @@ const ICON = {
   search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
   gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   sync:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>',
+  chevR:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+  chevL:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-9 6 9 6"/></svg>',
 };
 
 /* preset palette: [color, tint, ink] */
@@ -327,6 +338,11 @@ const TODAY=indexForDate(new Date());
 /* sliding window of rendered days (start is a Monday index) */
 let win={start: mondayIndex(TODAY)-7, weeks:8};
 let tlLeft=null;            // remembered horizontal scroll position
+/* areas rail: open/closed + width, saved per-device */
+let railOpen=true, railW=300;
+try{ railOpen=localStorage.getItem('tms_railOpen')!=='0'; }catch(e){}
+try{ railW=Math.max(180,Math.min(620, parseInt(localStorage.getItem('tms_railW'))||300)); }catch(e){}
+function persistRail(){ try{ localStorage.setItem('tms_railOpen', railOpen?'1':'0'); localStorage.setItem('tms_railW', String(railW)); }catch(e){} }
 let searchOpen=false, searchQ="";
 let settingsOpen=false;
 let addOpen=false, addDraft=null;   // quick-add (click a date)
@@ -348,13 +364,24 @@ function coverStyle(a){
 
 function renderTimeline(){
   const firstIdx=win.start, totalDays=win.weeks*7, lastIdx=firstIdx+totalDays, innerW=totalDays*COLW;
-  const projRows=PROJECTS.filter(p=>!p.done && AREAS[p.area] && (p.start+p.len)>firstIdx && p.start<lastIdx).map(p=>{
+  /* pack projects into rows: earliest start on top, stacking non-overlapping projects on the same row */
+  const vis=PROJECTS.filter(p=>!p.done && AREAS[p.area] && (p.start+p.len)>firstIdx && p.start<lastIdx)
+    .slice().sort((a,b)=> a.start-b.start || b.len-a.len);
+  const packed=[];
+  vis.forEach(p=>{
+    const end=p.start+p.len;
+    let r=0;
+    for(; r<packed.length; r++){ if(packed[r].every(q=> p.start>=q.start+q.len || end<=q.start)) break; }
+    if(r===packed.length) packed.push([]);
+    packed[r].push(p);
+  });
+  const projRows=packed.map(rowArr=>`<div class="proj-row">`+rowArr.map(p=>{
     const a=AREAS[p.area];
-    return `<div class="proj-row"><div class="bar" style="left:${(p.start-firstIdx)*COLW}px; width:${p.len*COLW-5}px; background:${a.tint}; border-color:${a.color}; color:${a.ink};">
+    return `<div class="bar" style="left:${(p.start-firstIdx)*COLW}px; width:${p.len*COLW-5}px; background:${a.tint}; border-color:${a.color}; color:${a.ink};">
       <span class="bar-handle l" data-resize="l" data-id="${p.id}"></span>
       <span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span><span class="lbl" data-edit data-kind="proj" data-id="${p.id}">${p.title}</span><button class="edit-btn" data-editbtn data-kind="proj" data-id="${p.id}" aria-label="Edit">${ICON.pencil}</button>
-      <span class="bar-handle r" data-resize="r" data-id="${p.id}"></span></div></div>`;
-  }).join("");
+      <span class="bar-handle r" data-resize="r" data-id="${p.id}"></span></div>`;
+  }).join("")+`</div>`).join("");
   let dayCols="";
   for(let d=0; d<totalDays; d++){
     const idx=firstIdx+d;
@@ -377,7 +404,18 @@ function renderTimeline(){
     return `<div class="area-card" data-area="${key}"><div class="area-cover" style="${coverStyle(a)}"></div>
       <div class="area-meta"><div class="nm">${a.name}</div></div></div>`;
   }).join("");
-  return `<div class="main">
+  const gridCols=railOpen?`minmax(0,1fr) 8px ${railW}px`:`minmax(0,1fr)`;
+  const railHtml=railOpen?`
+    <div class="divider" id="railDivider" aria-label="Resize areas"></div>
+    <div class="rail">
+      <div class="rail-head"><span class="t">Areas</span><div class="rail-actions">
+        <button class="icon-btn" id="addArea" aria-label="Add area" style="width:28px;height:28px;">${ICON.plus}</button>
+        <button class="icon-btn" id="railToggle" aria-label="Hide areas" style="width:28px;height:28px;">${ICON.chevR}</button>
+      </div></div>
+      <div class="gallery">${areaCards}</div>
+    </div>`:'';
+  const expandBtn=railOpen?'':`<button class="rail-expand" id="railToggle" aria-label="Show areas">${ICON.chevL}</button>`;
+  return `<div class="main" style="grid-template-columns:${gridCols};">
     <div class="tl-wrap"><div class="tl-scroll"><div class="tl-inner" style="width:${innerW}px;">
       <div class="wk-head" style="grid-template-columns:repeat(${win.weeks}, ${COLW*7}px);">${weekCells}</div>
       <div class="day-head" style="grid-template-columns:repeat(${totalDays}, ${COLW}px);">${dayHeadCells}</div>
@@ -385,12 +423,8 @@ function renderTimeline(){
       <div class="proj-zone"><div class="proj-add" style="grid-template-columns:repeat(${totalDays}, ${COLW}px);">${projAddSlots}</div><div class="today-col" style="left:${todayLeft}px; width:${COLW}px;"></div>${projRows}</div>
       <div class="zone-label">TASKS</div>
       <div class="task-zone" style="grid-template-columns:repeat(${totalDays}, ${COLW}px); position:relative;"><div class="today-col" style="left:${todayLeft}px; width:${COLW}px;"></div>${dayCols}</div>
-    </div></div></div>
-    <div class="rail">
-      <div class="rail-head"><span class="t">Areas</span><button class="icon-btn" id="addArea" aria-label="Add area" style="width:28px;height:28px;">${ICON.plus}</button></div>
-      <div class="gallery">${areaCards}</div>
-    </div>
-  </div>`;
+    </div></div></div>${railHtml}
+  </div>${expandBtn}`;
 }
 
 function renderArea(key){
@@ -649,9 +683,22 @@ function initBars(){
         else { let ns=oStart+dDays, len=oLen-(ns-oStart); if(len<1){ ns=oStart+oLen-1; len=1; } p.start=ns; p.len=len; }
         bar.style.left=((p.start-win.start)*COLW)+'px'; bar.style.width=(p.len*COLW-5)+'px';
       };
-      const up=()=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); saveProject(p); sync("update",{id:p.id, due_date:ymd(p.start), deadline_date:ymd(p.start+p.len-1)}); };
+      const up=()=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); saveProject(p); sync("update",{id:p.id, due_date:ymd(p.start), deadline_date:ymd(p.start+p.len-1)}); mount(); };
       document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
     });
+  });
+}
+
+/* drag the divider between timeline and areas rail to resize the rail */
+function initDivider(){
+  const dv=document.getElementById('railDivider'); if(!dv) return;
+  dv.addEventListener('pointerdown', ev=>{
+    ev.preventDefault(); dv.classList.add('active');
+    const main=dv.closest('.main'), sx=ev.clientX, ow=railW;
+    try{ dv.setPointerCapture(ev.pointerId); }catch(e){}
+    const move=mev=>{ railW=Math.max(180, Math.min(620, ow - (mev.clientX-sx))); if(main) main.style.gridTemplateColumns=`minmax(0,1fr) 8px ${railW}px`; };
+    const up=()=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); dv.classList.remove('active'); persistRail(); };
+    document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
   });
 }
 
@@ -723,6 +770,7 @@ function initTimeline(){
   });
   initBars();
   initChips();
+  initDivider();
 }
 
 function mount(){
@@ -848,6 +896,8 @@ document.addEventListener('click', async e=>{
     await sync('update',{id, title, due_date:ymd(start), deadline_date:isP?ymd(start+(len>0?len-1:0)):undefined, set_project:isP});
     await syncPull(); mount(); return;
   }
+  /* toggle the areas rail */
+  if(e.target.closest('#railToggle')){ railOpen=!railOpen; persistRail(); mount(); return; }
   /* manual sync with Todoist */
   if(e.target.closest('#doSync')){ const b=e.target.closest('#doSync'); b.style.opacity=".4"; await syncPull(); b.style.opacity=""; mount(); return; }
   /* open / close search */
@@ -1046,10 +1096,32 @@ async function seedDefaults(){
 }
 
 async function syncPull(){ const r=await sync("pull"); if(r && r.error) console.error("Todoist pull failed", r); await loadData(); }
+
+/* cheap signature of visible state so background refreshes only re-render on real change */
+function dataSig(){ return JSON.stringify([
+  Object.keys(AREAS).sort(),
+  PROJECTS.map(p=>[p.id,p.area,p.title,p.start,p.len,p.done]),
+  TASKS.map(t=>[t.id,t.area,t.title,t.day,t.done]),
+  UNSCHED.length ]); }
+/* true when the user is mid-interaction and a silent re-render would be disruptive */
+function uiBusy(){ return searchOpen||settingsOpen||addOpen||editOpen||schedOpen||!!editing||!!draft; }
+
+const SYNC_INTERVAL=30000;   // background Todoist sync cadence
+async function backgroundSync(){
+  if(view.page!=="timeline" || uiBusy()) return;
+  const before=dataSig();
+  try{ await syncPull(); }catch(e){ console.error("bg sync", e); return; }
+  if(view.page==="timeline" && !uiBusy() && dataSig()!==before) mount();
+}
+
 async function init(){
-  try{ await syncPull(); }
-  catch(err){ console.error("Sync/load failed", err); try{ await loadData(); }catch(e){} }
+  try{ await loadData(); }catch(err){ console.error("initial load failed", err); }
   mount();
+  /* pull from Todoist in the background, then refresh once it lands */
+  const before=dataSig();
+  syncPull().then(()=>{ if(view.page==="timeline" && !uiBusy() && dataSig()!==before) mount(); })
+            .catch(e=>console.error("initial sync", e));
+  setInterval(backgroundSync, SYNC_INTERVAL);
 }
 init();
 </script>
