@@ -924,16 +924,23 @@ document.addEventListener('click', async e=>{
     const name=(draft.name||'').trim(); if(!name){ const n=document.getElementById('fName'); if(n) n.focus(); return; }
     const payload={name, note:draft.note||"", graded:draft.graded, color:draft.color, tint:draft.tint, ink:draft.ink, cover:draft.cover||"",
       coverX:draft.coverX==null?50:draft.coverX, coverY:draft.coverY==null?50:draft.coverY, coverZoom:draft.coverZoom==null?100:draft.coverZoom, credit:draft._credit||""};
+    const graded=draft.graded;
     if(view.page==="add"){
-      const key="a"+Date.now();
-      AREAS[key]={...payload, grades:draft.graded?[{name:"",score:"",weight:""}]:[]};
-      saveArea(key);
-      draft=null; view={page:"timeline",area:null}; mount(); return;
+      draft=null; view={page:"timeline",area:null}; mount();
+      const res=await sync("create_project",{name:payload.name});   // make it a real Todoist project so it persists
+      const key=(res && res.id)?String(res.id):("a"+Date.now());
+      AREAS[key]={...payload, grades:graded?[{name:"",score:"",weight:""}]:[]};
+      saveArea(key); mount();
+      return;
     } else {
-      const a=AREAS[view.area]; Object.assign(a,payload);
+      const editKey=view.area; const a=AREAS[editKey];
+      const nameChanged=(a.name!==payload.name);
+      Object.assign(a,payload);
       if(a.graded && !a.grades.length) a.grades=[{name:"",score:"",weight:""}];
-      saveArea(view.area);
-      draft=null; view={page:"area",area:view.area}; mount(); return;
+      saveArea(editKey);
+      draft=null; view={page:"area",area:editKey}; mount();
+      if(nameChanged) sync("update_project",{id:editKey, name:payload.name});   // push rename to Todoist
+      return;
     }
   }
   /* grade rows */
@@ -1006,6 +1013,7 @@ async function saveArea(key){ if(!AREAS[key]) return; const {error}=await SB.fro
 async function saveProject(p){ const {error}=await SB.from('projects').upsert(projToRow(p)); if(error) console.error('saveProject', error); }
 async function saveTask(t){ const {error}=await SB.from('tasks').upsert(taskToRow(t)); if(error) console.error('saveTask', error); }
 async function deleteArea(key){
+  sync("delete_project",{id:key});   // remove the Todoist project so it doesn't return on next sync
   const {error}=await SB.from('areas').delete().eq('id',key);
   if(error){ console.error('deleteArea', error); alert('Could not delete area: '+error.message); return; }
   delete AREAS[key];
