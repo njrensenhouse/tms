@@ -45,7 +45,7 @@
   .main{flex:1 1 auto; display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:16px; padding:16px 22px 22px; min-height:0;}
 
   .tl-wrap{background:var(--surface); border:0.5px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; display:flex; flex-direction:column; min-height:0;}
-  .tl-scroll{overflow:auto; flex:1 1 auto;}
+  .tl-scroll{overflow:auto; flex:1 1 auto; touch-action:pan-x pan-y;}
   .tl-inner{position:relative;}
   .wk-head{display:grid; border-bottom:0.5px solid var(--line2);}
   .wk-head > div{padding:9px 14px; font-weight:500; font-size:13px; color:var(--ink); border-right:0.5px solid var(--line);}
@@ -58,8 +58,10 @@
   .proj-zone{position:relative; padding:10px 0 6px;}
   .today-col{position:absolute; top:0; bottom:0; background:var(--today); pointer-events:none;}
   .proj-row{position:relative; height:30px; margin-bottom:6px;}
-  .bar{position:absolute; height:26px; border-radius:var(--radius); display:flex; align-items:center; gap:7px;
-    padding:0 9px; cursor:pointer; border:0.5px solid; font-size:12.5px; font-weight:500; white-space:nowrap; overflow:hidden;}
+  .bar{position:absolute; height:26px; border-radius:var(--radius); display:flex; align-items:center;
+    cursor:pointer; border:0.5px solid; font-size:12.5px; font-weight:500; white-space:nowrap;}
+  /* content rides the visible edge of the bar so it's always readable while scrolling */
+  .bar-sticky{position:sticky; left:0; z-index:1; display:flex; align-items:center; gap:7px; height:100%; padding:0 9px; max-width:100%; min-width:0; box-sizing:border-box;}
   .bar .lbl{overflow:hidden; text-overflow:ellipsis;}
   .bar.done .lbl{text-decoration:line-through; opacity:.55;}
   .task-zone{display:grid; align-items:start; padding-top:9px; min-height:150px;}
@@ -204,6 +206,14 @@
   .edit-btn:hover{ opacity:1; }
   .edit-btn svg{ width:12px; height:12px; }
 
+  /* compact (zoomed out past ~3 weeks): hide text, shrink tasks toward squares */
+  .tl-inner.compact .day-head>div{ font-size:0; }
+  .tl-inner.compact .wk-head>div{ overflow:hidden; text-overflow:ellipsis; }
+  .tl-inner.compact .bar .lbl, .tl-inner.compact .bar .edit-btn{ display:none; }
+  .tl-inner.compact .chip{ aspect-ratio:1; padding:0; gap:0; min-height:0; background:var(--ac) !important; border-color:var(--ac) !important; }
+  .tl-inner.compact .chip .chip-top, .tl-inner.compact .chip .lbl{ display:none; }
+  .wk-head>div{ overflow:hidden; }
+
   /* unscheduled scheduler */
   .sched-btn{ position:relative; }
   .badge{ position:absolute; right:-3px; bottom:-3px; min-width:15px; height:15px; padding:0 3px; border-radius:8px; background:#D4537E; color:#fff; font-size:9px; font-weight:600; line-height:15px; text-align:center; }
@@ -335,8 +345,8 @@ function indexForDate(d){ return Math.round((new Date(d.getFullYear(),d.getMonth
 function fmtDay(i){ const d=dateForIndex(i); return MON[d.getMonth()]+" "+d.getDate(); }
 function mondayIndex(i){ const dow=dateForIndex(i).getDay(); return i-((dow+6)%7); }
 const TODAY=indexForDate(new Date());
-/* sliding window of rendered days (start is a Monday index) */
-let win={start: mondayIndex(TODAY)-7, weeks:8};
+/* sliding window of rendered days (start is a Monday index) — wide so zoom-out has content */
+let win={start: mondayIndex(TODAY)-21, weeks:40};
 let tlLeft=null;            // remembered horizontal scroll position
 /* areas rail: open/closed + width, saved per-device */
 let railOpen=true, railW=300;
@@ -377,9 +387,9 @@ function renderTimeline(){
   });
   const projRows=packed.map(rowArr=>`<div class="proj-row">`+rowArr.map(p=>{
     const a=AREAS[p.area];
-    return `<div class="bar" style="left:${(p.start-firstIdx)*COLW}px; width:${p.len*COLW-5}px; background:${a.tint}; border-color:${a.color}; color:${a.ink};">
+    return `<div class="bar" style="left:calc(var(--colw) * ${p.start-firstIdx}); width:calc(var(--colw) * ${p.len} - 5px); background:${a.tint}; border-color:${a.color}; color:${a.ink}; --ac:${a.color};">
       <span class="bar-handle l" data-resize="l" data-id="${p.id}"></span>
-      <span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span><span class="lbl" data-edit data-kind="proj" data-id="${p.id}">${p.title}</span><button class="edit-btn" data-editbtn data-kind="proj" data-id="${p.id}" aria-label="Edit">${ICON.pencil}</button>
+      <div class="bar-sticky"><span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span><span class="lbl" data-edit data-kind="proj" data-id="${p.id}">${p.title}</span><button class="edit-btn" data-editbtn data-kind="proj" data-id="${p.id}" aria-label="Edit">${ICON.pencil}</button></div>
       <span class="bar-handle r" data-resize="r" data-id="${p.id}"></span></div>`;
   }).join("")+`</div>`).join("");
   let dayCols="";
@@ -387,7 +397,7 @@ function renderTimeline(){
     const idx=firstIdx+d;
     const items=TASKS.filter(t=>t.day===idx && !t.done && AREAS[t.area]).map(t=>{
       const a=AREAS[t.area];
-      return `<div class="chip" data-task-id="${t.id}" style="background:${a.tint}; border-color:${a.color}; color:${a.ink};">
+      return `<div class="chip" data-task-id="${t.id}" style="background:${a.tint}; border-color:${a.color}; color:${a.ink}; --ac:${a.color};">
         <div class="chip-top"><span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span><button class="edit-btn" data-editbtn data-kind="task" data-id="${t.id}" aria-label="Edit">${ICON.pencil}</button></div>
         <span class="lbl" data-edit data-kind="task" data-id="${t.id}">${t.title}</span></div>`;
     }).join("");
@@ -416,13 +426,13 @@ function renderTimeline(){
     </div>`:'';
   const expandBtn=railOpen?'':`<button class="rail-expand" id="railToggle" aria-label="Show areas">${ICON.chevL}</button>`;
   return `<div class="main" style="grid-template-columns:${gridCols};">
-    <div class="tl-wrap"><div class="tl-scroll"><div class="tl-inner" style="width:${innerW}px;">
-      <div class="wk-head" style="grid-template-columns:repeat(${win.weeks}, ${COLW*7}px);">${weekCells}</div>
-      <div class="day-head" style="grid-template-columns:repeat(${totalDays}, ${COLW}px);">${dayHeadCells}</div>
+    <div class="tl-wrap"><div class="tl-scroll"><div class="tl-inner" style="--colw:${COLW}px; width:calc(var(--colw) * ${totalDays});">
+      <div class="wk-head" style="grid-template-columns:repeat(${win.weeks}, calc(var(--colw) * 7));">${weekCells}</div>
+      <div class="day-head" style="grid-template-columns:repeat(${totalDays}, var(--colw));">${dayHeadCells}</div>
       <div class="zone-label">PROJECTS</div>
-      <div class="proj-zone"><div class="proj-add" style="grid-template-columns:repeat(${totalDays}, ${COLW}px);">${projAddSlots}</div><div class="today-col" style="left:${todayLeft}px; width:${COLW}px;"></div>${projRows}</div>
+      <div class="proj-zone"><div class="proj-add" style="grid-template-columns:repeat(${totalDays}, var(--colw));">${projAddSlots}</div><div class="today-col" style="left:calc(var(--colw) * ${TODAY-firstIdx}); width:var(--colw);"></div>${projRows}</div>
       <div class="zone-label">TASKS</div>
-      <div class="task-zone" style="grid-template-columns:repeat(${totalDays}, ${COLW}px); position:relative;"><div class="today-col" style="left:${todayLeft}px; width:${COLW}px;"></div>${dayCols}</div>
+      <div class="task-zone" style="grid-template-columns:repeat(${totalDays}, var(--colw)); position:relative;"><div class="today-col" style="left:calc(var(--colw) * ${TODAY-firstIdx}); width:var(--colw);"></div>${dayCols}</div>
     </div></div></div>${railHtml}
   </div>${expandBtn}`;
 }
@@ -706,11 +716,11 @@ function initDivider(){
 function initChips(){
   document.querySelectorAll('.chip[data-task-id]').forEach(ch=>{
     ch.addEventListener('pointerdown', ev=>{
-      if(editing) return; if(ev.target.closest('.cbx') || ev.target.closest('.edit-btn')) return;
+      if(editing || pinch) return; if(ev.target.closest('.cbx') || ev.target.closest('.edit-btn')) return;
       const id=ch.dataset.taskId; const t=TASKS.find(x=>x.id===id); if(!t) return;
       const startX=ev.clientX; let moved=false;
       try{ ch.setPointerCapture(ev.pointerId); }catch(e){}
-      const move=mev=>{ const dx=mev.clientX-startX; if(!moved && Math.abs(dx)>4){ moved=true; ch.style.position="relative"; ch.style.zIndex="5"; } if(moved){ ch.style.transform=`translateX(${dx}px)`; } };
+      const move=mev=>{ if(pinch){ ch.style.transform=""; return; } const dx=mev.clientX-startX; if(!moved && Math.abs(dx)>4){ moved=true; ch.style.position="relative"; ch.style.zIndex="5"; } if(moved){ ch.style.transform=`translateX(${dx}px)`; } };
       const up=mev=>{ ch.removeEventListener('pointermove',move); ch.removeEventListener('pointerup',up);
         ch.style.transform=""; ch.style.zIndex=""; ch.style.position="";
         if(moved){ const dd=Math.round((mev.clientX-startX)/COLW); suppressClickUntil=Date.now()+300; if(dd!==0){ t.day=t.day+dd; saveTask(t); sync("update",{id, due_date:ymd(t.day)}); mount(); } }
@@ -760,6 +770,7 @@ function renderSearchResults(){
 
 function initTimeline(){
   const sc=document.querySelector('.tl-scroll'); if(!sc) return;
+  const inner=document.querySelector('.tl-inner'); if(inner) inner.classList.toggle('compact', (sc.clientWidth/COLW) > 21);
   if(tlLeft==null) tlLeft=Math.max(0,(TODAY-win.start)*COLW - COLW*2);
   sc.scrollLeft=tlLeft;
   sc.addEventListener('scroll', ()=>{
@@ -1033,22 +1044,59 @@ document.addEventListener('keydown', e=>{
 });
 document.addEventListener('focusout', e=>{ if(editing && e.target===editing.el) commitTitleEdit(false); });
 
-/* ---- pinch / ctrl-wheel to zoom the timeline (day-column width) ---- */
-let pinchBase=0, pinchColw=COLW, pinchRAF=0;
-document.addEventListener('touchmove', e=>{
-  if(e.touches.length!==2 || view.page!=='timeline' || editOpen || addOpen || schedOpen) return;
-  e.preventDefault();
-  const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY, dist=Math.hypot(dx,dy);
-  if(pinchBase===0){ pinchBase=dist; pinchColw=COLW; return; }
-  const nc=Math.max(30,Math.min(120, Math.round(pinchColw*dist/pinchBase)));
-  if(nc!==COLW){ COLW=nc; if(!pinchRAF) pinchRAF=requestAnimationFrame(()=>{ pinchRAF=0; persistColw(); if(view.page==='timeline') mount(); }); }
+/* ---- timeline zoom: smooth pinch (touch) + ctrl/⌘-wheel, focal-point anchored ----
+   Layout is parametrised by the CSS var --colw, so zooming just updates that variable
+   (no DOM rebuild) which keeps the gesture buttery on iPad. */
+const MINCOLW=10;                       // ~3+ months can fit across a wide screen
+function maxColw(){ const sc=document.querySelector('.tl-scroll'); return Math.max(160, sc?sc.clientWidth:900); } // a single day fills the view
+let pinch=null, zoomRAF=0, zoomPersistT=0;
+
+function applyZoom(newColw, focalClientX){
+  const sc=document.querySelector('.tl-scroll'), inner=document.querySelector('.tl-inner'); if(!sc||!inner) return;
+  newColw=Math.max(MINCOLW, Math.min(maxColw(), newColw));
+  const rect=sc.getBoundingClientRect();
+  const focalX=(focalClientX==null? sc.clientWidth/2 : focalClientX-rect.left);  // px from the left of the viewport
+  const dayAtFocal=(sc.scrollLeft+focalX)/COLW;       // fractional day index under the focal point
+  COLW=newColw;
+  inner.style.setProperty('--colw', COLW+'px');
+  sc.scrollLeft=dayAtFocal*COLW - focalX;             // keep that day pinned under the fingers
+  tlLeft=sc.scrollLeft;
+  inner.classList.toggle('compact', (sc.clientWidth/COLW) > 21);
+  clearTimeout(zoomPersistT);
+  zoomPersistT=setTimeout(()=>{ persistColw(); growForZoom(); }, 180);
+}
+/* make sure the rendered window has enough days to fill the viewport once zoomed out */
+function growForZoom(){
+  const sc=document.querySelector('.tl-scroll'); if(!sc) return;
+  const need=Math.ceil((sc.clientWidth/COLW)*1.6/7)+2;
+  if(win.weeks<need){ win.weeks=need; if(view.page==='timeline' && !uiBusy()) mount(); }
+}
+
+document.addEventListener('touchstart', e=>{
+  if(view.page!=='timeline' || uiBusy()) return;
+  if(e.touches.length===2){
+    const a=e.touches[0], b=e.touches[1];
+    pinch={ d:Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY), c:COLW, target:COLW, midX:(a.clientX+b.clientX)/2 };
+    e.preventDefault();
+  }
 }, {passive:false});
-document.addEventListener('touchend', e=>{ if(e.touches.length<2) pinchBase=0; });
+document.addEventListener('touchmove', e=>{
+  if(!pinch || e.touches.length!==2) return;
+  e.preventDefault();
+  const a=e.touches[0], b=e.touches[1];
+  const d=Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
+  pinch.target=pinch.c * d/pinch.d;
+  pinch.midX=(a.clientX+b.clientX)/2;
+  if(!zoomRAF) zoomRAF=requestAnimationFrame(()=>{ zoomRAF=0; if(pinch) applyZoom(pinch.target, pinch.midX); });
+}, {passive:false});
+function endPinch(e){ if(!e.touches || e.touches.length<2){ pinch=null; } }
+document.addEventListener('touchend', endPinch);
+document.addEventListener('touchcancel', endPinch);
+
 document.addEventListener('wheel', e=>{
   if((e.ctrlKey||e.metaKey) && e.target.closest && e.target.closest('.tl-scroll')){
     e.preventDefault();
-    const nc=Math.max(30,Math.min(120, Math.round(COLW - Math.sign(e.deltaY)*4)));
-    if(nc!==COLW){ COLW=nc; persistColw(); mount(); }
+    applyZoom(COLW * Math.exp(-e.deltaY*0.0015), e.clientX);
   }
 }, {passive:false});
 
