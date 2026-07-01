@@ -206,12 +206,27 @@
   .edit-btn:hover{ opacity:1; }
   .edit-btn svg{ width:12px; height:12px; }
 
-  /* compact (zoomed out past ~3 weeks): hide text, shrink tasks toward squares */
+  /* area emoji tags on bars, chips, and gallery cards */
+  .tag-emoji{ flex:0 0 auto; font-size:12.5px; line-height:1; }
+  .ct-left{ display:flex; align-items:center; gap:4px; min-width:0; }
+  .nm-emoji{ margin-right:6px; }
+  /* emoji picker in the area form */
+  .emoji-row{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .emoji-cur{ width:40px; height:40px; flex:0 0 auto; border:0.5px solid var(--line2); border-radius:9px; background:var(--bg); font-size:22px; display:flex; align-items:center; justify-content:center; color:var(--faint); }
+  .emoji-grid{ display:flex; flex-wrap:wrap; gap:5px; width:100%; }
+  .emoji-opt{ width:36px; height:36px; border:0.5px solid var(--line); border-radius:8px; background:var(--surface); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--ink); }
+  .emoji-opt:active{ transform:scale(.94); }
+  .emoji-opt.sel{ border-color:#1D9E75; background:var(--bg); }
+
+  /* compact (zoomed out past ~3 weeks): hide text, shrink tasks toward emoji squares */
   .tl-inner.compact .day-head>div{ font-size:0; }
   .tl-inner.compact .wk-head>div{ overflow:hidden; text-overflow:ellipsis; }
   .tl-inner.compact .bar .lbl, .tl-inner.compact .bar .edit-btn{ display:none; }
-  .tl-inner.compact .chip{ aspect-ratio:1; padding:0; gap:0; min-height:0; background:var(--ac) !important; border-color:var(--ac) !important; }
-  .tl-inner.compact .chip .chip-top, .tl-inner.compact .chip .lbl{ display:none; }
+  .tl-inner.compact .chip{ aspect-ratio:1; padding:0; gap:0; min-height:0; align-items:center; justify-content:center; background:var(--ac) !important; border-color:var(--ac) !important; }
+  .tl-inner.compact .chip .lbl, .tl-inner.compact .chip .cbx, .tl-inner.compact .chip .edit-btn{ display:none; }
+  .tl-inner.compact .chip .chip-top{ justify-content:center; height:100%; margin:0; }
+  .tl-inner.compact .chip .ct-left{ justify-content:center; gap:0; }
+  .tl-inner.compact .tag-emoji{ font-size:11px; }
   .wk-head>div{ overflow:hidden; }
 
   /* unscheduled scheduler */
@@ -280,6 +295,9 @@ const ICON = {
   chevR:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
   chevL:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-9 6 9 6"/></svg>',
 };
+
+/* quick-pick emojis for area identification (any typed/pasted emoji also works) */
+const EMOJI_SET=["📚","✍️","🎓","🧠","💭","⛪","🙏","✝️","📖","🗣️","💰","🏠","👨‍👩‍👧","❤️","💪","🏃","🍳","🧹","🛠️","📷","🎨","🎵","💻","📅","✅","🌱","🔬","⚖️","🌍","🧾","📝","☕"];
 
 /* preset palette: [color, tint, ink] */
 const PALETTE=[
@@ -387,9 +405,10 @@ function renderTimeline(){
   });
   const projRows=packed.map(rowArr=>`<div class="proj-row">`+rowArr.map(p=>{
     const a=AREAS[p.area];
+    const em=a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:'';
     return `<div class="bar" style="left:calc(var(--colw) * ${p.start-firstIdx}); width:calc(var(--colw) * ${p.len} - 5px); background:${a.tint}; border-color:${a.color}; color:${a.ink}; --ac:${a.color};">
       <span class="bar-handle l" data-resize="l" data-id="${p.id}"></span>
-      <div class="bar-sticky"><span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span><span class="lbl" data-edit data-kind="proj" data-id="${p.id}">${p.title}</span><button class="edit-btn" data-editbtn data-kind="proj" data-id="${p.id}" aria-label="Edit">${ICON.pencil}</button></div>
+      <div class="bar-sticky"><span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span>${em}<span class="lbl" data-edit data-kind="proj" data-id="${p.id}">${p.title}</span><button class="edit-btn" data-editbtn data-kind="proj" data-id="${p.id}" aria-label="Edit">${ICON.pencil}</button></div>
       <span class="bar-handle r" data-resize="r" data-id="${p.id}"></span></div>`;
   }).join("")+`</div>`).join("");
   let dayCols="";
@@ -397,8 +416,9 @@ function renderTimeline(){
     const idx=firstIdx+d;
     const items=TASKS.filter(t=>t.day===idx && !t.done && AREAS[t.area]).map(t=>{
       const a=AREAS[t.area];
+      const em=a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:'';
       return `<div class="chip" data-task-id="${t.id}" style="background:${a.tint}; border-color:${a.color}; color:${a.ink}; --ac:${a.color};">
-        <div class="chip-top"><span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span><button class="edit-btn" data-editbtn data-kind="task" data-id="${t.id}" aria-label="Edit">${ICON.pencil}</button></div>
+        <div class="chip-top"><div class="ct-left"><span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span>${em}</div><button class="edit-btn" data-editbtn data-kind="task" data-id="${t.id}" aria-label="Edit">${ICON.pencil}</button></div>
         <span class="lbl" data-edit data-kind="task" data-id="${t.id}">${t.title}</span></div>`;
     }).join("");
     dayCols+=`<div class="day-col" data-day="${idx}">${items}<button class="cell-add" data-add="task" data-day="${idx}" aria-label="Add task">${ICON.plus}</button></div>`;
@@ -412,7 +432,7 @@ function renderTimeline(){
   const todayLeft=(TODAY-firstIdx)*COLW;
   const areaCards=Object.entries(AREAS).map(([key,a])=>{
     return `<div class="area-card" data-area="${key}"><div class="area-cover" style="${coverStyle(a)}"></div>
-      <div class="area-meta"><div class="nm">${a.name}</div></div></div>`;
+      <div class="area-meta"><div class="nm">${a.emoji?`<span class="nm-emoji">${a.emoji}</span>`:''}${a.name}</div></div></div>`;
   }).join("");
   const gridCols=railOpen?`minmax(0,1fr) 8px ${railW}px`:`minmax(0,1fr)`;
   const railHtml=railOpen?`
@@ -490,6 +510,16 @@ function renderAreaForm(mode){
       </div>
 
       <div class="field"><label>Name</label><input type="text" id="fName" value="${(d.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Greek 101"></div>
+
+      <div class="field"><label>Emoji</label>
+        <div class="emoji-row">
+          <div class="emoji-cur" id="emojiCur">${d.emoji||'·'}</div>
+          <input type="text" id="emojiInput" maxlength="8" value="${(d.emoji||'').replace(/"/g,'&quot;')}" placeholder="type or paste" style="width:140px; font:inherit; font-size:15px; padding:8px 11px; border:0.5px solid var(--line2); border-radius:9px; background:var(--bg);">
+          <button type="button" class="emoji-opt ${d.emoji?'':'sel'}" data-emoji="" title="None">✕</button>
+          <div class="emoji-grid">${EMOJI_SET.map(e=>`<button type="button" class="emoji-opt ${d.emoji===e?'sel':''}" data-emoji="${e}">${e}</button>`).join('')}</div>
+        </div>
+      </div>
+
       <div class="field"><label>Description</label><textarea id="fNote" rows="3" placeholder="What is this area about?">${d.note||''}</textarea></div>
 
       <div class="field"><label>Color</label>
@@ -561,7 +591,7 @@ function topbar(){
     const a=AREAS[view.area];
     return `<header class="topbar">
       <button class="txt-btn" id="toTimeline" style="display:flex;align-items:center;gap:5px;"><span style="width:15px;height:15px;display:inline-flex">${ICON.back}</span>Timeline</button>
-      <h1 style="flex:1;text-align:center;font-size:20px;">${a.name}</h1>
+      <h1 style="flex:1;text-align:center;font-size:20px;">${a.emoji?a.emoji+' ':''}${a.name}</h1>
       <button class="icon-btn" id="toEdit" aria-label="Edit area">${ICON.pencil}</button></header>`;
   }
   const title = view.page==="add" ? "New area" : "Edit area";
@@ -616,7 +646,7 @@ async function scheduleUnsched(id, idx){
 }
 function renderSched(){
   const items = UNSCHED.length ? UNSCHED.map(u=>{ const a=AREAS[u.area]||{};
-    return `<div class="sched-item" data-usid="${u.id}"><span class="sr-dot" style="background:${a.color||'#888'}"></span><div class="sr-main"><div class="sr-title">${u.title}</div><div class="sr-meta">${u.isProject?'Project':'Task'} · ${a.name||'—'}</div></div><input type="date" class="sched-date" data-usid="${u.id}"></div>`; }).join("")
+    return `<div class="sched-item" data-usid="${u.id}"><span class="sr-dot" style="background:${a.color||'#888'}"></span><div class="sr-main"><div class="sr-title">${a.emoji?a.emoji+' ':''}${u.title}</div><div class="sr-meta">${u.isProject?'Project':'Task'} · ${a.name||'—'}</div></div><input type="date" class="sched-date" data-usid="${u.id}"></div>`; }).join("")
     : `<div class="sr-empty">Nothing unscheduled.</div>`;
   return `<div class="sched-drawer" id="schedDrawer">
     <div class="sched-head"><span>Unscheduled · ${UNSCHED.length}</span><button class="txt-btn" id="closeSched">Close</button></div>
@@ -657,7 +687,7 @@ function renderSettings(){
 
 function renderAdd(){
   const d=addDraft;
-  const areaOpts=Object.entries(AREAS).map(([k,a])=>`<option value="${k}" ${k===d.area?'selected':''}>${a.name}</option>`).join("");
+  const areaOpts=Object.entries(AREAS).map(([k,a])=>`<option value="${k}" ${k===d.area?'selected':''}>${a.emoji?a.emoji+' ':''}${a.name}</option>`).join("");
   return `<div class="search-overlay" id="addOverlay"><div class="search-box" style="width:min(440px,92vw);">
     <div class="search-top" style="justify-content:space-between;"><span style="color:var(--ink); font-weight:500;">New item · ${fmtDay(d.day)}</span><button class="txt-btn" id="addCancel">Cancel</button></div>
     <div style="padding:16px 18px;">
@@ -761,9 +791,9 @@ function renderSearchResults(){
   if(!q) return `<div class="sr-empty">Type to search across all tasks and projects — including completed ones.</div>`;
   const rows=[];
   PROJECTS.filter(p=>(p.title||'').toLowerCase().includes(q)).forEach(p=>{ const a=AREAS[p.area]||{};
-    rows.push(`<div class="sr-row ${p.done?'done':''}"><span class="cbx ${p.done?'on':''}" data-scbx="proj" data-id="${p.id}" style="color:${a.color||'#888'}">${ICON.check}</span><span class="sr-dot" style="background:${a.color||'#888'}"></span><div class="sr-main"><div class="sr-title">${p.title}</div><div class="sr-meta">Project · ${a.name||'—'} · ${fmtDay(p.start)} – ${fmtDay(p.start+p.len-1)}</div></div></div>`); });
+    rows.push(`<div class="sr-row ${p.done?'done':''}"><span class="cbx ${p.done?'on':''}" data-scbx="proj" data-id="${p.id}" style="color:${a.color||'#888'}">${ICON.check}</span><span class="sr-dot" style="background:${a.color||'#888'}"></span><div class="sr-main"><div class="sr-title">${a.emoji?a.emoji+' ':''}${p.title}</div><div class="sr-meta">Project · ${a.name||'—'} · ${fmtDay(p.start)} – ${fmtDay(p.start+p.len-1)}</div></div></div>`); });
   TASKS.filter(t=>(t.title||'').toLowerCase().includes(q)).forEach(t=>{ const a=AREAS[t.area]||{};
-    rows.push(`<div class="sr-row ${t.done?'done':''}"><span class="cbx ${t.done?'on':''}" data-scbx="task" data-id="${t.id}" style="color:${a.color||'#888'}">${ICON.check}</span><span class="sr-dot" style="background:${a.color||'#888'}"></span><div class="sr-main"><div class="sr-title">${t.title}</div><div class="sr-meta">Task · ${a.name||'—'} · ${fmtDay(t.day)}</div></div></div>`); });
+    rows.push(`<div class="sr-row ${t.done?'done':''}"><span class="cbx ${t.done?'on':''}" data-scbx="task" data-id="${t.id}" style="color:${a.color||'#888'}">${ICON.check}</span><span class="sr-dot" style="background:${a.color||'#888'}"></span><div class="sr-main"><div class="sr-title">${a.emoji?a.emoji+' ':''}${t.title}</div><div class="sr-meta">Task · ${a.name||'—'} · ${fmtDay(t.day)}</div></div></div>`); });
   if(!rows.length) return `<div class="sr-empty">No matches.</div>`;
   return rows.join("");
 }
@@ -848,11 +878,12 @@ function initCrop(){
 function captureDraftFields(){
   const n=document.getElementById('fName'); if(n) draft.name=n.value;
   const nt=document.getElementById('fNote'); if(nt) draft.note=nt.value;
+  const em=document.getElementById('emojiInput'); if(em) draft.emoji=em.value.trim();
   const g=document.getElementById('fGraded'); if(g) draft.graded=g.checked;
 }
 
 function startAdd(){
-  draft={name:"", note:"", graded:false, color:"#888780", tint:"#F1EFE8", ink:"#2C2C2A", cover:"", grades:[], _tab:"unsplash", _results:null, _q:"", _credit:""};
+  draft={name:"", emoji:"", note:"", graded:false, color:"#888780", tint:"#F1EFE8", ink:"#2C2C2A", cover:"", grades:[], _tab:"unsplash", _results:null, _q:"", _credit:""};
   view={page:"add", area:null}; mount();
 }
 function startEdit(key){
@@ -974,6 +1005,9 @@ document.addEventListener('click', async e=>{
     test.onerror=()=>{ let h=hintBox.querySelector('.hint'); if(h) h.textContent="Couldn't load that image — check the URL is a direct link to a .jpg/.png and is publicly reachable."; };
     test.src=u; return;
   }
+  /* emoji picker */
+  const eo=e.target.closest('.emoji-opt');
+  if(eo){ captureDraftFields(); draft.emoji=eo.dataset.emoji||""; mount(); return; }
   /* color swatch */
   const sw=e.target.closest('.swatch[data-color]');
   if(sw){ const set=colorSetFromHex(sw.dataset.color); Object.assign(draft,set);
@@ -983,7 +1017,7 @@ document.addEventListener('click', async e=>{
   if(e.target.closest('#fSave')){
     captureDraftFields();
     const name=(draft.name||'').trim(); if(!name){ const n=document.getElementById('fName'); if(n) n.focus(); return; }
-    const payload={name, note:draft.note||"", graded:draft.graded, color:draft.color, tint:draft.tint, ink:draft.ink, cover:draft.cover||"",
+    const payload={name, emoji:draft.emoji||"", note:draft.note||"", graded:draft.graded, color:draft.color, tint:draft.tint, ink:draft.ink, cover:draft.cover||"",
       coverX:draft.coverX==null?50:draft.coverX, coverY:draft.coverY==null?50:draft.coverY, coverZoom:draft.coverZoom==null?100:draft.coverZoom, credit:draft._credit||""};
     const graded=draft.graded;
     if(view.page==="add"){
@@ -1017,6 +1051,7 @@ document.addEventListener('click', async e=>{
 document.addEventListener('input', e=>{
   if(e.target.id==="searchInput"){ searchQ=e.target.value; const rs=document.getElementById('searchResults'); if(rs) rs.innerHTML=renderSearchResults(); return; }
   if(e.target.id==="scaleRange"){ applyScale(parseFloat(e.target.value)); const sv=document.getElementById('scaleVal'); if(sv) sv.textContent=Math.round(uiScale*100)+'%'; return; }
+  if(e.target.id==="emojiInput"){ draft.emoji=e.target.value.trim(); const c=document.getElementById('emojiCur'); if(c) c.textContent=draft.emoji||'·'; document.querySelectorAll('.emoji-opt').forEach(b=>b.classList.toggle('sel', (b.dataset.emoji||"")===draft.emoji)); return; }
   if(e.target.dataset.g) recalcGrade();
   if(e.target.id==="cropZoom"){ draft.coverZoom=parseFloat(e.target.value); const cp=document.getElementById('coverPrev'); if(cp) cp.style.cssText=coverStyle(draft); }
   if(e.target.id==="fColor"){ const set=colorSetFromHex(e.target.value); Object.assign(draft,set);
@@ -1101,7 +1136,7 @@ document.addEventListener('wheel', e=>{
 }, {passive:false});
 
 /* ---------- Supabase persistence ---------- */
-function areaToRow(key,a){return {id:key, name:a.name, graded:!!a.graded, color:a.color, tint:a.tint, ink:a.ink,
+function areaToRow(key,a){return {id:key, name:a.name, emoji:a.emoji||"", graded:!!a.graded, color:a.color, tint:a.tint, ink:a.ink,
   cover:a.cover||"", cover_x:a.coverX==null?50:a.coverX, cover_y:a.coverY==null?50:a.coverY, cover_zoom:a.coverZoom==null?100:a.coverZoom,
   credit:a.credit||"", note:a.note||"", grades:a.grades||[]};}
 function projToRow(p){return {id:p.id, area:p.area, title:p.title, start_day:p.start, len:p.len, done:!!p.done};}
@@ -1128,7 +1163,7 @@ async function loadData(){
   ]);
   if(aRes.error) throw aRes.error; if(pRes.error) throw pRes.error; if(tRes.error) throw tRes.error;
   AREAS={};
-  (aRes.data||[]).forEach(a=>{ AREAS[a.id]={name:a.name, graded:a.graded, color:a.color, tint:a.tint, ink:a.ink,
+  (aRes.data||[]).forEach(a=>{ AREAS[a.id]={name:a.name, emoji:a.emoji||"", graded:a.graded, color:a.color, tint:a.tint, ink:a.ink,
     cover:a.cover||"", coverX:a.cover_x, coverY:a.cover_y, coverZoom:a.cover_zoom, credit:a.credit||"", note:a.note||"",
     grades:Array.isArray(a.grades)?a.grades:[]}; });
   PROJECTS=(pRes.data||[]).map(p=>({id:p.id, area:p.area, title:p.title, start:p.start_day, len:p.len, done:p.done}));
