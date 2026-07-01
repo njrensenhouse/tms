@@ -218,6 +218,25 @@
   .emoji-opt:active{ transform:scale(.94); }
   .emoji-opt.sel{ border-color:#1D9E75; background:var(--bg); }
 
+  /* area picker cards in add/edit popups */
+  .area-pick{ display:flex; flex-wrap:wrap; gap:8px; }
+  .area-chip{ display:flex; align-items:center; gap:6px; padding:7px 11px; border:0.5px solid var(--line2); border-radius:10px; background:var(--surface); color:var(--ink); font:inherit; font-size:13px; cursor:pointer; max-width:100%; }
+  .area-chip .ac-emoji{ font-size:15px; flex:0 0 auto; }
+  .area-chip .ac-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .area-chip:active{ transform:scale(.97); }
+  .area-chip.sel{ border-color:#1D9E75; background:var(--bg); }
+  /* sticky timeline header (weeks + days) */
+  .tl-head{ position:sticky; top:0; z-index:6; background:var(--surface); }
+  .day-head>div .ddow{ display:none; }
+  .tl-inner.daymode .day-head>div .ddow{ display:block; font-size:11px; }
+  .tl-inner.daymode .day-head>div .dnum{ display:block; font-size:9px; opacity:.55; margin-top:1px; }
+  /* password gate */
+  .gate{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:var(--bg); z-index:500; }
+  .gate-box{ display:flex; flex-direction:column; gap:12px; width:260px; text-align:center; }
+  .gate-title{ font-family:var(--serif); font-size:30px; margin-bottom:4px; }
+  .gate-box input{ font:inherit; font-size:15px; padding:10px 12px; border:0.5px solid var(--line2); border-radius:10px; background:var(--surface); color:var(--ink); text-align:center; }
+  .gate-msg{ font-size:12px; color:#E07B9E; min-height:14px; }
+
   /* compact (zoomed out past ~3 weeks): hide text, shrink tasks toward emoji squares */
   .tl-inner.compact .day-head>div{ font-size:0; }
   .tl-inner.compact .wk-head>div{ overflow:hidden; text-overflow:ellipsis; }
@@ -358,12 +377,13 @@ let COLW=54; try{ COLW=parseInt(localStorage.getItem('tms_colw'))||54; }catch(e)
 function persistColw(){ try{ localStorage.setItem('tms_colw', String(COLW)); }catch(e){} }
 const EPOCH=new Date(2026,5,22);
 const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DOW=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 function dateForIndex(i){ return new Date(EPOCH.getTime()+i*MS); }
 function indexForDate(d){ return Math.round((new Date(d.getFullYear(),d.getMonth(),d.getDate())-EPOCH)/MS); }
 function fmtDay(i){ const d=dateForIndex(i); return MON[d.getMonth()]+" "+d.getDate(); }
 function mondayIndex(i){ const dow=dateForIndex(i).getDay(); return i-((dow+6)%7); }
 const TODAY=indexForDate(new Date());
-/* sliding window of rendered days (start is a Monday index) — wide so zoom-out has content */
+/* sliding window of rendered days (start is a Monday index) */
 let win={start: mondayIndex(TODAY)-21, weeks:40};
 let tlLeft=null;            // remembered horizontal scroll position
 /* areas rail: open/closed + width, saved per-device */
@@ -371,6 +391,10 @@ let railOpen=true, railW=300;
 try{ railOpen=localStorage.getItem('tms_railOpen')!=='0'; }catch(e){}
 try{ railW=Math.max(180,Math.min(620, parseInt(localStorage.getItem('tms_railW'))||300)); }catch(e){}
 function persistRail(){ try{ localStorage.setItem('tms_railOpen', railOpen?'1':'0'); localStorage.setItem('tms_railW', String(railW)); }catch(e){} }
+/* remember the last area used when adding, and default to it next time */
+let lastArea=null; try{ lastArea=localStorage.getItem('tms_lastArea')||null; }catch(e){}
+function persistLastArea(){ try{ if(lastArea) localStorage.setItem('tms_lastArea', lastArea); }catch(e){} }
+let pending=0;   // outstanding optimistic writes — pause background sync while >0
 let searchOpen=false, searchQ="";
 let settingsOpen=false;
 let addOpen=false, addDraft=null;   // quick-add (click a date)
@@ -426,7 +450,7 @@ function renderTimeline(){
   let projAddSlots="";
   for(let d=0; d<totalDays; d++){ const idx=firstIdx+d; projAddSlots+=`<div class="slot"><button class="cell-add" data-add="project" data-day="${idx}" aria-label="Add project">${ICON.plus}</button></div>`; }
   let dayHeadCells="";
-  for(let d=0; d<totalDays; d++){ const idx=firstIdx+d; dayHeadCells+=`<div class="${idx===TODAY?'today':''}" data-day="${idx}">${dateForIndex(idx).getDate()}</div>`; }
+  for(let d=0; d<totalDays; d++){ const idx=firstIdx+d; const dt=dateForIndex(idx); dayHeadCells+=`<div class="${idx===TODAY?'today':''}" data-day="${idx}"><span class="ddow">${DOW[dt.getDay()]}</span><span class="dnum">${dt.getDate()}</span></div>`; }
   let weekCells="";
   for(let w=0; w<win.weeks; w++){ const s=firstIdx+w*7; weekCells+=`<div>${fmtDay(s)} – ${fmtDay(s+6)}</div>`; }
   const todayLeft=(TODAY-firstIdx)*COLW;
@@ -447,8 +471,10 @@ function renderTimeline(){
   const expandBtn=railOpen?'':`<button class="rail-expand" id="railToggle" aria-label="Show areas">${ICON.chevL}</button>`;
   return `<div class="main" style="grid-template-columns:${gridCols};">
     <div class="tl-wrap"><div class="tl-scroll"><div class="tl-inner" style="--colw:${COLW}px; width:calc(var(--colw) * ${totalDays});">
-      <div class="wk-head" style="grid-template-columns:repeat(${win.weeks}, calc(var(--colw) * 7));">${weekCells}</div>
-      <div class="day-head" style="grid-template-columns:repeat(${totalDays}, var(--colw));">${dayHeadCells}</div>
+      <div class="tl-head">
+        <div class="wk-head" style="grid-template-columns:repeat(${win.weeks}, calc(var(--colw) * 7));">${weekCells}</div>
+        <div class="day-head" style="grid-template-columns:repeat(${totalDays}, var(--colw));">${dayHeadCells}</div>
+      </div>
       <div class="zone-label">PROJECTS</div>
       <div class="proj-zone"><div class="proj-add" style="grid-template-columns:repeat(${totalDays}, var(--colw));">${projAddSlots}</div><div class="today-col" style="left:calc(var(--colw) * ${TODAY-firstIdx}); width:var(--colw);"></div>${projRows}</div>
       <div class="zone-label">TASKS</div>
@@ -613,13 +639,14 @@ function idxOfStr(s){ if(!s) return TODAY; const [y,m,d]=s.split('-').map(Number
 /* ---- edit-item popup (title / dates / task<->project) ---- */
 function openEditItem(kind, id){
   const list=kind==="proj"?PROJECTS:TASKS; const it=list.find(x=>x.id===id); if(!it) return;
-  editDraft = kind==="proj" ? {id, type:"project", title:it.title, start:it.start, len:it.len}
-                            : {id, type:"task", title:it.title, start:it.day, len:1};
+  editDraft = kind==="proj" ? {id, type:"project", title:it.title, desc:it.desc||"", area:it.area, start:it.start, len:it.len, oarea:it.area}
+                            : {id, type:"task", title:it.title, desc:it.desc||"", area:it.area, start:it.day, len:1, oarea:it.area};
   editOpen=true; mount();
 }
 function captureEdit(){
   if(!editDraft) return;
   const ti=document.getElementById('editTitle'); if(ti) editDraft.title=ti.value;
+  const de=document.getElementById('editDesc'); if(de) editDraft.desc=de.value;
   const st=document.getElementById('editStart'); if(st && st.value) editDraft.start=idxOfStr(st.value);
   const en=document.getElementById('editEnd'); if(en && en.value){ const e=idxOfStr(en.value); editDraft.len=Math.max(1, e-editDraft.start+1); }
 }
@@ -630,6 +657,8 @@ function renderEdit(){
     <div style="padding:16px 18px;">
       <div class="seg"><button class="tab ${!isP?'on':''}" data-edittype="task">Task</button><button class="tab ${isP?'on':''}" data-edittype="project">Project</button></div>
       <div class="field"><label>Title</label><input type="text" id="editTitle" value="${(d.title||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Description</label><textarea id="editDesc" rows="2" placeholder="Optional notes">${d.desc||''}</textarea></div>
+      <div class="field"><label>Area</label>${areaPickHtml(d.area)}</div>
       <div class="field"><label>${isP?'Start date':'Date'}</label><input type="date" id="editStart" value="${ymd(d.start)}"></div>
       ${isP?`<div class="field"><label>End date</label><input type="date" id="editEnd" value="${ymd(d.start+(d.len>0?d.len-1:0))}"></div>`:''}
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;"><button class="danger-btn" id="editDelete" style="width:auto; margin:0; padding:8px 12px;">Delete</button><button class="txt-btn primary" id="editSave">Save</button></div>
@@ -681,31 +710,42 @@ function renderSettings(){
         <input type="range" id="scaleRange" min="0.8" max="1.6" step="0.05" value="${uiScale}" style="width:100%;">
         <div class="hint">Make everything larger or smaller. Saved on this device.</div>
       </div>
+      <button class="txt-btn" id="lockBtn" style="margin-top:16px; width:100%;">Lock &amp; sign out</button>
     </div>
   </div></div>`;
 }
 
+function areaPickHtml(sel){
+  return `<div class="area-pick">${Object.entries(AREAS).map(([k,a])=>`<button type="button" class="area-chip ${k===sel?'sel':''}" data-areapick="${k}"><span class="ac-emoji">${a.emoji||'•'}</span><span class="ac-name">${a.name}</span></button>`).join('')}</div>`;
+}
 function renderAdd(){
   const d=addDraft;
-  const areaOpts=Object.entries(AREAS).map(([k,a])=>`<option value="${k}" ${k===d.area?'selected':''}>${a.emoji?a.emoji+' ':''}${a.name}</option>`).join("");
-  return `<div class="search-overlay" id="addOverlay"><div class="search-box" style="width:min(440px,92vw);">
+  return `<div class="search-overlay" id="addOverlay"><div class="search-box" style="width:min(460px,92vw);">
     <div class="search-top" style="justify-content:space-between;"><span style="color:var(--ink); font-weight:500;">New item · ${fmtDay(d.day)}</span><button class="txt-btn" id="addCancel">Cancel</button></div>
-    <div style="padding:16px 18px;">
+    <div style="padding:16px 18px; overflow:auto;">
       <div class="seg">
         <button class="tab ${d.type==='task'?'on':''}" data-addtype="task">Task</button>
         <button class="tab ${d.type==='project'?'on':''}" data-addtype="project">Project</button>
       </div>
       <div class="field"><label>Title</label><input type="text" id="addTitle" value="${(d.title||'').replace(/"/g,'&quot;')}" placeholder="What needs doing?"></div>
-      <div class="field"><label>Area</label><select id="addAreaSel" class="sel">${areaOpts}</select></div>
+      <div class="field"><label>Description</label><textarea id="addDesc" rows="2" placeholder="Optional notes">${d.desc||''}</textarea></div>
+      <div class="field"><label>Area</label>${areaPickHtml(d.area)}</div>
       ${d.type==='project'?`<div class="field"><label>Length (days)</label><input type="text" id="addLen" inputmode="numeric" value="${d.len}"></div>`:''}
       <div style="display:flex; justify-content:flex-end; margin-top:4px;"><button class="txt-btn primary" id="addSave">Add</button></div>
     </div>
   </div></div>`;
 }
+function captureAdd(){
+  if(!addDraft) return;
+  const t=document.getElementById('addTitle'); if(t) addDraft.title=t.value;
+  const de=document.getElementById('addDesc'); if(de) addDraft.desc=de.value;
+  const l=document.getElementById('addLen'); if(l) addDraft.len=parseInt(l.value)||addDraft.len;
+}
 function openAdd(day, type){
   const keys=Object.keys(AREAS);
   if(!keys.length){ alert('Add an area first (+ in the Areas rail).'); return; }
-  addDraft={type:(type==='project'?'project':'task'), title:'', area:keys[0], day, len:3};
+  const area=(lastArea && AREAS[lastArea]) ? lastArea : keys[0];
+  addDraft={type:(type==='project'?'project':'task'), title:'', desc:'', area, day, len:3};
   addOpen=true; mount();
 }
 
@@ -800,7 +840,7 @@ function renderSearchResults(){
 
 function initTimeline(){
   const sc=document.querySelector('.tl-scroll'); if(!sc) return;
-  const inner=document.querySelector('.tl-inner'); if(inner) inner.classList.toggle('compact', (sc.clientWidth/COLW) > 21);
+  const inner=document.querySelector('.tl-inner'); if(inner){ const dv=sc.clientWidth/COLW; inner.classList.toggle('compact', dv>21); inner.classList.toggle('daymode', dv<=16); }
   if(tlLeft==null) tlLeft=Math.max(0,(TODAY-win.start)*COLW - COLW*2);
   sc.scrollLeft=tlLeft;
   sc.addEventListener('scroll', ()=>{
@@ -931,12 +971,24 @@ document.addEventListener('click', async e=>{
   const editTypeBtn=e.target.closest('[data-edittype]');
   if(editTypeBtn){ captureEdit(); editDraft.type=editTypeBtn.dataset.edittype; if(editDraft.type==='project' && (!editDraft.len||editDraft.len<1)) editDraft.len=3; mount(); return; }
   if(e.target.closest('#editCancel') || e.target.id==="editOverlay"){ editOpen=false; editDraft=null; mount(); return; }
-  if(e.target.closest('#editDelete')){ const id=editDraft.id; if(confirm('Delete this item? It will also be deleted in Todoist.')){ editOpen=false; editDraft=null; mount(); await sync('delete',{id}); await syncPull(); mount(); } return; }
+  if(e.target.closest('#editDelete')){ const id=editDraft.id; if(confirm('Delete this item? It will also be deleted in Todoist.')){ editOpen=false; editDraft=null;
+      PROJECTS=PROJECTS.filter(x=>x.id!==id); TASKS=TASKS.filter(x=>x.id!==id); mount();
+      pending++; sync('delete',{id}).finally(()=>{pending--;}); } return; }
   if(e.target.closest('#editSave')){
-    captureEdit(); const {id,type,title,start,len}=editDraft; const isP=type==='project';
-    editOpen=false; editDraft=null; mount();
-    await sync('update',{id, title, due_date:ymd(start), deadline_date:isP?ymd(start+(len>0?len-1:0)):undefined, set_project:isP});
-    await syncPull(); mount(); return;
+    captureEdit(); const d=editDraft; const isP=d.type==='project'; const id=d.id;
+    editOpen=false; editDraft=null;
+    /* apply locally & instantly; move item between task/project lists if the type changed */
+    const cur=PROJECTS.find(x=>x.id===id)||TASKS.find(x=>x.id===id);
+    const done=cur?cur.done:false;
+    PROJECTS=PROJECTS.filter(x=>x.id!==id); TASKS=TASKS.filter(x=>x.id!==id);
+    const areaChanged=(d.oarea!==undefined && d.oarea!==d.area);
+    if(isP){ const item={id, area:d.area, title:d.title, desc:d.desc||"", start:d.start, len:Math.max(1,d.len||1), done}; PROJECTS.push(item); saveProject(item); }
+    else { const item={id, area:d.area, title:d.title, desc:d.desc||"", day:d.start, done}; TASKS.push(item); saveTask(item); }
+    mount();
+    pending++;
+    sync('update',{id, title:d.title, description:d.desc||"", ...(areaChanged?{area:d.area}:{}), due_date:ymd(d.start), deadline_date:isP?ymd(d.start+(d.len>0?d.len-1:0)):undefined, set_project:isP})
+      .finally(()=>{ pending--; });
+    return;
   }
   /* toggle the areas rail */
   if(e.target.closest('#railToggle')){ railOpen=!railOpen; persistRail(); mount(); return; }
@@ -948,23 +1000,37 @@ document.addEventListener('click', async e=>{
   /* open / close settings */
   if(e.target.closest('#openSettings')){ settingsOpen=true; mount(); return; }
   if(e.target.closest('#closeSettings') || e.target.id==="settingsOverlay"){ settingsOpen=false; mount(); return; }
+  if(e.target.closest('#lockBtn')){ lockOut(); return; }
+  /* area picker cards (shared by add + edit popups) */
+  const ap=e.target.closest('[data-areapick]');
+  if(ap){ if(addOpen){ captureAdd(); addDraft.area=ap.dataset.areapick; mount(); } else if(editOpen){ captureEdit(); editDraft.area=ap.dataset.areapick; mount(); } return; }
   /* quick-add overlay */
   const addTypeBtn=e.target.closest('[data-addtype]');
-  if(addTypeBtn){ const ti=document.getElementById('addTitle'); if(ti) addDraft.title=ti.value; const ar=document.getElementById('addAreaSel'); if(ar) addDraft.area=ar.value; const ln=document.getElementById('addLen'); if(ln) addDraft.len=parseInt(ln.value)||addDraft.len; addDraft.type=addTypeBtn.dataset.addtype; mount(); return; }
+  if(addTypeBtn){ captureAdd(); addDraft.type=addTypeBtn.dataset.addtype; mount(); return; }
   if(e.target.closest('#addCancel') || e.target.id==="addOverlay"){ addOpen=false; addDraft=null; mount(); return; }
   if(e.target.closest('#addSave')){
-    const title=(document.getElementById('addTitle').value||'').trim(); if(!title){ const n=document.getElementById('addTitle'); if(n) n.focus(); return; }
-    const area=document.getElementById('addAreaSel').value;
+    captureAdd();
+    const title=(addDraft.title||'').trim(); if(!title){ const n=document.getElementById('addTitle'); if(n) n.focus(); return; }
+    const desc=(addDraft.desc||'').trim();
+    const area=addDraft.area;
     const isProject=addDraft.type==='project';
-    let len=1; if(isProject){ len=parseInt(document.getElementById('addLen').value)||1; if(len<1) len=1; }
+    let len=1; if(isProject){ len=parseInt(addDraft.len)||1; if(len<1) len=1; }
     const day=addDraft.day;
-    addOpen=false; addDraft=null; mount();
-    const res=await sync("create",{title, area, isProject, due_date:ymd(day), deadline_date:isProject?ymd(day+len-1):undefined});
-    if(res && res.id){
-      if(isProject){ const p={id:res.id, area, title, start:day, len, done:false}; PROJECTS.push(p); saveProject(p); }
-      else { const t={id:res.id, area, title, day, done:false}; TASKS.push(t); saveTask(t); }
-      mount();
-    } else { console.error("create failed", res); alert("Couldn't add to Todoist — is sync set up? See console."); }
+    addOpen=false; addDraft=null;
+    /* optimistic: show it instantly with a temp id, reconcile once Todoist returns the real id */
+    const tempId="tmp"+Date.now();
+    const item=isProject ? {id:tempId, area, title, desc, start:day, len, done:false}
+                         : {id:tempId, area, title, desc, day, done:false};
+    (isProject?PROJECTS:TASKS).push(item);
+    lastArea=area; persistLastArea();
+    mount();
+    pending++;
+    sync("create",{title, area, isProject, description:desc, due_date:ymd(day), deadline_date:isProject?ymd(day+len-1):undefined})
+      .then(res=>{
+        if(res && res.id){ item.id=String(res.id); (isProject?saveProject:saveTask)(item); }
+        else { console.error("create failed", res); if(isProject) PROJECTS=PROJECTS.filter(x=>x!==item); else TASKS=TASKS.filter(x=>x!==item); mount(); alert("Couldn't add to Todoist — see console."); }
+      })
+      .finally(()=>{ pending--; });
     return;
   }
   /* Notion-style “+” to add a task/project on a date */
@@ -1096,7 +1162,7 @@ function applyZoom(newColw, focalClientX){
   inner.style.setProperty('--colw', COLW+'px');
   sc.scrollLeft=dayAtFocal*COLW - focalX;             // keep that day pinned under the fingers
   tlLeft=sc.scrollLeft;
-  inner.classList.toggle('compact', (sc.clientWidth/COLW) > 21);
+  const dv=sc.clientWidth/COLW; inner.classList.toggle('compact', dv>21); inner.classList.toggle('daymode', dv<=16);
   clearTimeout(zoomPersistT);
   zoomPersistT=setTimeout(()=>{ persistColw(); growForZoom(); }, 180);
 }
@@ -1139,8 +1205,8 @@ document.addEventListener('wheel', e=>{
 function areaToRow(key,a){return {id:key, name:a.name, emoji:a.emoji||"", graded:!!a.graded, color:a.color, tint:a.tint, ink:a.ink,
   cover:a.cover||"", cover_x:a.coverX==null?50:a.coverX, cover_y:a.coverY==null?50:a.coverY, cover_zoom:a.coverZoom==null?100:a.coverZoom,
   credit:a.credit||"", note:a.note||"", grades:a.grades||[]};}
-function projToRow(p){return {id:p.id, area:p.area, title:p.title, start_day:p.start, len:p.len, done:!!p.done};}
-function taskToRow(t){return {id:t.id, area:t.area, title:t.title, day:t.day, done:!!t.done};}
+function projToRow(p){return {id:p.id, area:p.area, title:p.title, description:p.desc||"", start_day:p.start, len:p.len, done:!!p.done};}
+function taskToRow(t){return {id:t.id, area:t.area, title:t.title, description:t.desc||"", day:t.day, done:!!t.done};}
 
 async function saveArea(key){ if(!AREAS[key]) return; const {error}=await SB.from('areas').upsert(areaToRow(key,AREAS[key])); if(error) console.error('saveArea', error); }
 async function saveProject(p){ const {error}=await SB.from('projects').upsert(projToRow(p)); if(error) console.error('saveProject', error); }
@@ -1166,8 +1232,8 @@ async function loadData(){
   (aRes.data||[]).forEach(a=>{ AREAS[a.id]={name:a.name, emoji:a.emoji||"", graded:a.graded, color:a.color, tint:a.tint, ink:a.ink,
     cover:a.cover||"", coverX:a.cover_x, coverY:a.cover_y, coverZoom:a.cover_zoom, credit:a.credit||"", note:a.note||"",
     grades:Array.isArray(a.grades)?a.grades:[]}; });
-  PROJECTS=(pRes.data||[]).map(p=>({id:p.id, area:p.area, title:p.title, start:p.start_day, len:p.len, done:p.done}));
-  TASKS=(tRes.data||[]).map(t=>({id:t.id, area:t.area, title:t.title, day:t.day, done:t.done}));
+  PROJECTS=(pRes.data||[]).map(p=>({id:p.id, area:p.area, title:p.title, desc:p.description||"", start:p.start_day, len:p.len, done:p.done}));
+  TASKS=(tRes.data||[]).map(t=>({id:t.id, area:t.area, title:t.title, desc:t.description||"", day:t.day, done:t.done}));
   try{ const uRes=await SB.from('unscheduled').select('*').order('created_at'); UNSCHED=(uRes.data||[]).map(u=>({id:u.id, area:u.area, title:u.title, isProject:u.is_project})); }catch(e){ UNSCHED=[]; }
 }
 
@@ -1191,7 +1257,7 @@ function uiBusy(){ return searchOpen||settingsOpen||addOpen||editOpen||schedOpen
 
 const SYNC_INTERVAL=30000;   // background Todoist sync cadence
 async function backgroundSync(){
-  if(view.page!=="timeline" || uiBusy()) return;
+  if(view.page!=="timeline" || uiBusy() || pending>0) return;
   const before=dataSig();
   try{ await syncPull(); }catch(e){ console.error("bg sync", e); return; }
   if(view.page==="timeline" && !uiBusy() && dataSig()!==before) mount();
@@ -1206,7 +1272,21 @@ async function init(){
             .catch(e=>console.error("initial sync", e));
   setInterval(backgroundSync, SYNC_INTERVAL);
 }
-init();
+/* ---- basic access gate (client-side; stops casual access, not a hard security boundary) ---- */
+const PASS_HASH="e0044cc6bc75988bf0afe2a60068a4d7ab7c4e0790ce51b7a32796da101aec8d"; // sha256 of the password
+async function sha256hex(s){ const b=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+function authed(){ try{ return localStorage.getItem('tms_auth')==='ok'; }catch(e){ return false; } }
+function lockOut(){ try{ localStorage.removeItem('tms_auth'); }catch(e){} location.reload(); }
+function renderGate(msg){
+  document.getElementById('app').innerHTML=`<div class="gate"><div class="gate-box"><div class="gate-title">TMS</div><input type="password" id="gatePass" placeholder="Password"><button class="txt-btn primary" id="gateGo">Enter</button><div class="gate-msg" id="gateMsg">${msg||''}</div></div></div>`;
+  const inp=document.getElementById('gatePass'); if(inp) inp.focus();
+  const go=async()=>{ const v=(document.getElementById('gatePass').value||''); const h=await sha256hex(v);
+    if(h===PASS_HASH){ try{ localStorage.setItem('tms_auth','ok'); }catch(e){} init(); }
+    else { const m=document.getElementById('gateMsg'); if(m) m.textContent='Incorrect password'; const p=document.getElementById('gatePass'); if(p){ p.value=''; p.focus(); } } };
+  document.getElementById('gateGo').addEventListener('click', go);
+  inp.addEventListener('keydown', e=>{ if(e.key==='Enter') go(); });
+}
+if(authed()) init(); else renderGate();
 </script>
 </body>
 </html>
