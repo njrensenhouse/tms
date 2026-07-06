@@ -237,6 +237,19 @@
   .gate-box input{ font:inherit; font-size:15px; padding:10px 12px; border:0.5px solid var(--line2); border-radius:10px; background:var(--surface); color:var(--ink); text-align:center; }
   .gate-msg{ font-size:12px; color:#E07B9E; min-height:14px; }
 
+  /* draggable project bars + drag placeholder + range buttons + focus mode */
+  .bar{ touch-action:none; }
+  .side-btn.dim{ opacity:.32; }
+  .chip-ph{ flex:0 0 auto; height:34px; border:2px dashed var(--ink); border-radius:8px; opacity:.85; box-sizing:border-box; }
+  .chip.dragging-src{ display:none; }
+  body.card-dragging{ cursor:grabbing; }
+  .range-btns{ display:flex; gap:6px; }
+  .range-btn{ font:inherit; font-size:12px; padding:4px 11px; border-radius:8px; border:0.5px solid var(--line); background:transparent; color:var(--faint); cursor:pointer; }
+  .range-btn:hover{ color:var(--ink); border-color:var(--line2); }
+  .range-btn:active{ transform:scale(.97); }
+  body.focus-mode .sidebar, body.focus-mode header.topbar, body.focus-mode .rail, body.focus-mode .divider{ display:none; }
+  body.focus-mode .main{ grid-template-columns:1fr !important; }
+
   /* recurrence marker + ghost occurrences */
   .rep{ flex:0 0 auto; width:12px; height:12px; opacity:.6; display:inline-flex; }
   .rep svg{ width:12px; height:12px; }
@@ -349,6 +362,8 @@ const ICON = {
   repeat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
   list:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
   folder:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  undo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>',
+  redo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg>',
 };
 
 /* quick-pick emojis for area identification (any typed/pasted emoji also works) */
@@ -437,6 +452,43 @@ function persistRail(){ try{ localStorage.setItem('tms_railOpen', railOpen?'1':'
 let lastArea=null; try{ lastArea=localStorage.getItem('tms_lastArea')||null; }catch(e){}
 function persistLastArea(){ try{ if(lastArea) localStorage.setItem('tms_lastArea', lastArea); }catch(e){} }
 let pending=0;   // outstanding optimistic writes — pause background sync while >0
+
+/* ---- undo / redo (full local snapshots + a diff resync to Todoist/Supabase) ---- */
+let undoStack=[], redoStack=[];
+function snapshot(){ return { P:PROJECTS.map(x=>({...x})), T:TASKS.map(x=>({...x})), U:UNSCHED.map(x=>({...x})) }; }
+function pushUndo(){ undoStack.push(snapshot()); if(undoStack.length>60) undoStack.shift(); redoStack=[]; }
+function restoreState(s){ PROJECTS=s.P.map(x=>({...x})); TASKS=s.T.map(x=>({...x})); UNSCHED=s.U.map(x=>({...x})); }
+function resyncStates(fromS, toS){
+  const idx=arr=>{ const m={}; arr.forEach(x=>m[x.id]=x); return m; };
+  const oT=idx(fromS.T), nT=idx(toS.T), oP=idx(fromS.P), nP=idx(toS.P);
+  for(const id in nT){ const n=nT[id], o=oT[id]||{}; let ch=false;
+    if(o.day!==n.day){ sync("update",{id, due_date:ymd(n.day)}); ch=true; }
+    if(o.title!==n.title){ sync("update",{id, title:n.title}); ch=true; }
+    if(o.area!==n.area){ sync("update",{id, area:n.area}); ch=true; }
+    if(!!o.done!==!!n.done){ sync(n.done?"complete":"reopen",{id}); ch=true; }
+    if(ch || !oT[id]) saveTask(n);
+  }
+  for(const id in oT){ if(!nT[id]){ sync("delete",{id}); SB.from('tasks').delete().eq('id',id); } }
+  for(const id in nP){ const n=nP[id], o=oP[id]||{}; let ch=false;
+    if(o.start!==n.start||o.len!==n.len){ sync("update",{id, due_date:ymd(n.start), deadline_date:ymd(n.start+n.len-1)}); ch=true; }
+    if(o.title!==n.title){ sync("update",{id, title:n.title}); ch=true; }
+    if(o.area!==n.area){ sync("update",{id, area:n.area}); ch=true; }
+    if(!!o.done!==!!n.done){ sync(n.done?"complete":"reopen",{id}); ch=true; }
+    if(ch || !oP[id]) saveProject(n);
+  }
+  for(const id in oP){ if(!nP[id]){ sync("delete",{id}); SB.from('projects').delete().eq('id',id); } }
+}
+function undo(){ if(!undoStack.length) return; const cur=snapshot(); redoStack.push(cur); const prev=undoStack.pop(); restoreState(prev); mount(); pending++; resyncStates(cur, prev); setTimeout(()=>{ pending--; }, 1200); }
+function redo(){ if(!redoStack.length) return; const cur=snapshot(); undoStack.push(cur); const nxt=redoStack.pop(); restoreState(nxt); mount(); pending++; resyncStates(cur, nxt); setTimeout(()=>{ pending--; }, 1200); }
+
+/* ---- iPad control prefs (toggleable in Settings) ---- */
+let pPencilOnly=false, pTapUndo=false, pFourFinger=false, focusMode=false;
+try{ pPencilOnly=localStorage.getItem('tms_pencilOnly')==='1'; }catch(e){}
+try{ pTapUndo=localStorage.getItem('tms_tapUndo')==='1'; }catch(e){}
+try{ pFourFinger=localStorage.getItem('tms_fourFinger')==='1'; }catch(e){}
+function persistPref(k,v){ try{ localStorage.setItem(k, v?'1':'0'); }catch(e){} }
+function applyFocusMode(){ document.body.classList.toggle('focus-mode', focusMode); }
+
 let searchOpen=false, searchQ="";
 let settingsOpen=false;
 let menuOpen=false;   // add-button popup menu
@@ -473,7 +525,7 @@ function renderTimeline(){
   const projRows=packed.map(rowArr=>`<div class="proj-row">`+rowArr.map(p=>{
     const a=AREAS[p.area];
     const em=a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:'';
-    return `<div class="bar" style="left:calc(var(--colw) * ${p.start-firstIdx}); width:calc(var(--colw) * ${p.len} - 5px); background:${a.tint}; border-color:${a.color}; color:${a.ink}; --ac:${a.color};">
+    return `<div class="bar" data-pid="${p.id}" style="left:calc(var(--colw) * ${p.start-firstIdx}); width:calc(var(--colw) * ${p.len} - 5px); background:${a.tint}; border-color:${a.color}; color:${a.ink}; --ac:${a.color};">
       <span class="bar-handle l" data-resize="l" data-id="${p.id}"></span>
       <div class="bar-sticky"><span class="cbx" data-cbx="proj" data-id="${p.id}">${ICON.check}</span>${em}${p.recurring?`<span class="rep">${ICON.repeat}</span>`:''}<span class="lbl" data-edit data-kind="proj" data-id="${p.id}">${p.title}</span><button class="edit-btn" data-editbtn data-kind="proj" data-id="${p.id}" aria-label="Edit">${ICON.pencil}</button></div>
       <span class="bar-handle r" data-resize="r" data-id="${p.id}"></span></div>`;
@@ -668,7 +720,12 @@ function syncGradesToModel(){
 }
 
 function topbar(){
-  if(view.page==="timeline") return `<header class="topbar"><div></div></header>`;
+  if(view.page==="timeline") return `<header class="topbar"><div class="range-btns">
+    <button class="range-btn" data-range="1">Day</button>
+    <button class="range-btn" data-range="7">Week</button>
+    <button class="range-btn" data-range="14">Biweekly</button>
+    <button class="range-btn" data-range="30">Month</button>
+  </div></header>`;
   if(view.page==="area"){
     const a=AREAS[view.area];
     return `<header class="topbar">
@@ -686,7 +743,9 @@ function sidebar(){
     <button class="side-btn sched-btn" id="openAddMenu" aria-label="Add">${ICON.plus}<span class="badge" ${n?'':'hidden'}>${n}</span></button>
     <button class="side-btn" id="openSearch" aria-label="Search">${ICON.search}</button>
     <button class="side-btn" id="doSync" aria-label="Sync with Todoist">${ICON.sync}</button>
-    <button class="side-btn side-bottom" id="openSettings" aria-label="Settings">${ICON.gear}</button>
+    <button class="side-btn side-bottom ${undoStack.length?'':'dim'}" id="undoBtn" aria-label="Undo">${ICON.undo}</button>
+    <button class="side-btn ${redoStack.length?'':'dim'}" id="redoBtn" aria-label="Redo">${ICON.redo}</button>
+    <button class="side-btn" id="openSettings" aria-label="Settings">${ICON.gear}</button>
   </div>`;
 }
 
@@ -757,35 +816,11 @@ function initSched(){
   document.querySelectorAll('.sched-item').forEach(el=>{
     el.addEventListener('pointerdown', ev=>{
       if(ev.target.closest('.sched-date')) return;
-      ev.preventDefault();
+      if(pPencilOnly && ev.pointerType!=='pen') return;
       const id=el.dataset.usid; const u=UNSCHED.find(x=>x.id===id); if(!u) return;
+      ev.preventDefault();
       const a=AREAS[u.area]||{};
-      const sx=ev.clientX, sy=ev.clientY; let dragging=false, card=null, lastTarget=null;
-      try{ el.setPointerCapture(ev.pointerId); }catch(e){}
-      const setTarget=dc=>{ if(lastTarget && lastTarget!==dc) lastTarget.classList.remove('drop-target'); if(dc) dc.classList.add('drop-target'); lastTarget=dc; };
-      const start=()=>{
-        dragging=true; document.body.classList.add('sched-dragging'); el.classList.add('lifting');
-        card=document.createElement('div'); card.className='drag-card';
-        card.style.background=a.tint||'var(--surface)'; card.style.borderColor=a.color||'var(--line2)'; card.style.color=a.ink||'var(--ink)';
-        card.innerHTML=`${a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:''}<span class="dc-lbl">${(u.title||'').replace(/</g,'&lt;')}</span>`;
-        document.body.appendChild(card);
-      };
-      const dayAt=(x,y)=>{ const under=document.elementFromPoint(x,y); return under&&under.closest?under.closest('[data-day]'):null; };
-      const move=mev=>{
-        if(!dragging){ if(Math.abs(mev.clientX-sx)>4||Math.abs(mev.clientY-sy)>4) start(); else return; }
-        card.style.transform=`translate(calc(${mev.clientX}px - 50%), calc(${mev.clientY}px - 130%))`;
-        setTarget(dayAt(mev.clientX, mev.clientY));
-      };
-      const up=mev=>{
-        document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
-        try{ el.releasePointerCapture(ev.pointerId); }catch(e){}
-        document.body.classList.remove('sched-dragging'); el.classList.remove('lifting');
-        const dc = dragging ? dayAt(mev.clientX, mev.clientY) : null;
-        setTarget(null);
-        if(card) card.remove();
-        if(dc) scheduleUnsched(id, parseInt(dc.dataset.day,10));
-      };
-      document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+      beginCardDrag(ev, {a, title:u.title, sourceEl:el, fromUnsched:true, onDrop:day=>{ pushUndo(); scheduleUnsched(id, day); }});
     });
   });
 }
@@ -803,6 +838,13 @@ function renderSettings(){
         <input type="range" id="scaleRange" min="0.8" max="1.6" step="0.05" value="${uiScale}" style="width:100%;">
         <div class="hint">Make everything larger or smaller. Saved on this device.</div>
       </div>
+
+      <div style="margin-top:18px; padding-top:12px; border-top:0.5px solid var(--line); font-size:11px; letter-spacing:.05em; color:var(--faint);">IPAD CONTROLS</div>
+      <div class="toggle-row"><div><div class="tl-label">Pencil-only dragging</div><div class="tl-hint">Only the Apple Pencil moves cards; fingers scroll &amp; zoom</div></div><label class="switch"><input type="checkbox" id="prefPencil" ${pPencilOnly?'checked':''}><span class="track"></span><span class="knob"></span></label></div>
+      <div class="toggle-row"><div><div class="tl-label">Double-tap undo · triple-tap redo</div><div class="tl-hint">Tap empty space on the timeline</div></div><label class="switch"><input type="checkbox" id="prefTap" ${pTapUndo?'checked':''}><span class="track"></span><span class="knob"></span></label></div>
+      <div class="toggle-row"><div><div class="tl-label">Four-finger tap = focus mode</div><div class="tl-hint">Hide the bars &amp; sidebars; tap again to restore</div></div><label class="switch"><input type="checkbox" id="prefFour" ${pFourFinger?'checked':''}><span class="track"></span><span class="knob"></span></label></div>
+      <div class="toggle-row" style="opacity:.5;"><div><div class="tl-label">Pencil squeeze → add menu</div><div class="tl-hint">Unavailable — web browsers don't expose the Pencil squeeze gesture</div></div><label class="switch"><input type="checkbox" disabled><span class="track"></span><span class="knob"></span></label></div>
+
       <button class="txt-btn" id="lockBtn" style="margin-top:16px; width:100%;">Lock &amp; sign out</button>
     </div>
   </div></div>`;
@@ -848,7 +890,7 @@ function initBars(){
     h.addEventListener('pointerdown', ev=>{
       ev.preventDefault(); ev.stopPropagation();
       const p=PROJECTS.find(x=>x.id===h.dataset.id); if(!p) return;
-      const side=h.dataset.resize, startX=ev.clientX, oStart=p.start, oLen=p.len, bar=h.parentElement;
+      const side=h.dataset.resize, startX=ev.clientX, oStart=p.start, oLen=p.len, bar=h.parentElement, pre=snapshot();
       try{ h.setPointerCapture(ev.pointerId); }catch(e){}
       const move=mev=>{
         const dDays=Math.round((mev.clientX-startX)/COLW);
@@ -856,7 +898,9 @@ function initBars(){
         else { let ns=oStart+dDays, len=oLen-(ns-oStart); if(len<1){ ns=oStart+oLen-1; len=1; } p.start=ns; p.len=len; }
         bar.style.left=((p.start-win.start)*COLW)+'px'; bar.style.width=(p.len*COLW-5)+'px';
       };
-      const up=()=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); saveProject(p); sync("update",{id:p.id, due_date:ymd(p.start), deadline_date:ymd(p.start+p.len-1)}); mount(); };
+      const up=()=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
+        if(p.start!==oStart||p.len!==oLen){ undoStack.push(pre); if(undoStack.length>60) undoStack.shift(); redoStack=[]; }
+        saveProject(p); sync("update",{id:p.id, due_date:ymd(p.start), deadline_date:ymd(p.start+p.len-1)}); mount(); };
       document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
     });
   });
@@ -875,20 +919,54 @@ function initDivider(){
   });
 }
 
-/* drag a task chip horizontally to change its date */
+/* a floating preview that looks like the final chip */
+function chipPreview(a, title){
+  const c=document.createElement('div'); c.className='drag-card';
+  c.style.background=a.tint||'var(--surface)'; c.style.borderColor=a.color||'var(--line2)'; c.style.color=a.ink||'var(--ink)';
+  c.innerHTML=`${a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:''}<span class="dc-lbl">${(title||'').replace(/</g,'&lt;')}</span>`;
+  return c;
+}
+/* shared card drag: floating preview + a white-outline placeholder that pushes the target day's cards down */
+function beginCardDrag(ev, cfg){
+  const sx=ev.clientX, sy=ev.clientY; let dragging=false, card=null, ph=null, phCol=null;
+  const removePh=()=>{ if(ph&&ph.parentNode) ph.parentNode.removeChild(ph); phCol=null; };
+  const placePh=(x,y)=>{ const under=document.elementFromPoint(x,y); const col=under&&under.closest?under.closest('.day-col[data-day]'):null;
+    if(col!==phCol){ removePh(); if(col){ if(!ph){ ph=document.createElement('div'); ph.className='chip-ph'; } col.insertBefore(ph, col.firstChild); phCol=col; } } };
+  const startDrag=()=>{ dragging=true; document.body.classList.add('card-dragging'); if(cfg.fromUnsched) document.body.classList.add('sched-dragging'); if(cfg.sourceEl) cfg.sourceEl.classList.add('dragging-src');
+    card=chipPreview(cfg.a, cfg.title); document.body.appendChild(card); };
+  const move=mev=>{ if(!dragging){ if(Math.abs(mev.clientX-sx)>5||Math.abs(mev.clientY-sy)>5) startDrag(); else return; }
+    card.style.transform=`translate(calc(${mev.clientX}px - 50%), calc(${mev.clientY}px - 130%))`; placePh(mev.clientX, mev.clientY); };
+  const up=mev=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
+    document.body.classList.remove('card-dragging','sched-dragging'); if(cfg.sourceEl) cfg.sourceEl.classList.remove('dragging-src');
+    const col=phCol; removePh(); if(card) card.remove();
+    if(dragging){ suppressClickUntil=Date.now()+300; if(col) cfg.onDrop(parseInt(col.dataset.day,10)); else if(cfg.onCancel) cfg.onCancel(); }
+  };
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+}
+/* drag task chips (change date) and project bars (move start date) */
 function initChips(){
   document.querySelectorAll('.chip[data-task-id]').forEach(ch=>{
     ch.addEventListener('pointerdown', ev=>{
       if(editing || pinch) return; if(ev.target.closest('.cbx') || ev.target.closest('.edit-btn')) return;
+      if(pPencilOnly && ev.pointerType!=='pen') return;
       const id=ch.dataset.taskId; const t=TASKS.find(x=>x.id===id); if(!t) return;
-      const startX=ev.clientX; let moved=false;
-      try{ ch.setPointerCapture(ev.pointerId); }catch(e){}
-      const move=mev=>{ if(pinch){ ch.style.transform=""; return; } const dx=mev.clientX-startX; if(!moved && Math.abs(dx)>4){ moved=true; ch.style.position="relative"; ch.style.zIndex="5"; } if(moved){ ch.style.transform=`translateX(${dx}px)`; } };
-      const up=mev=>{ ch.removeEventListener('pointermove',move); ch.removeEventListener('pointerup',up);
-        ch.style.transform=""; ch.style.zIndex=""; ch.style.position="";
-        if(moved){ const dd=Math.round((mev.clientX-startX)/COLW); suppressClickUntil=Date.now()+300; if(dd!==0){ t.day=t.day+dd; saveTask(t); sync("update",{id, due_date:ymd(t.day)}); mount(); } }
-      };
-      ch.addEventListener('pointermove',move); ch.addEventListener('pointerup',up);
+      ev.preventDefault();
+      const a=AREAS[t.area]||{};
+      beginCardDrag(ev, {a, title:t.title, sourceEl:ch, onDrop:day=>{ if(day!==t.day){ pushUndo(); t.day=day; saveTask(t); sync("update",{id, due_date:ymd(day)}); } mount(); }});
+    });
+  });
+  document.querySelectorAll('.bar[data-pid]').forEach(bar=>{
+    bar.addEventListener('pointerdown', ev=>{
+      if(editing || pinch) return;
+      if(ev.target.closest('.bar-handle')||ev.target.closest('.cbx')||ev.target.closest('.edit-btn')||ev.target.closest('.lbl[data-edit]')) return;
+      if(pPencilOnly && ev.pointerType!=='pen') return;
+      const id=bar.dataset.pid; const p=PROJECTS.find(x=>x.id===id); if(!p) return;
+      ev.preventDefault();
+      const sx=ev.clientX, baseLeft=(p.start-win.start)*COLW; let moved=false;
+      const move=mev=>{ const dx=mev.clientX-sx; if(!moved && Math.abs(dx)>5){ moved=true; bar.style.zIndex="6"; bar.style.opacity=".9"; } if(moved) bar.style.left=(baseLeft+dx)+"px"; };
+      const up=mev=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); bar.style.zIndex=""; bar.style.opacity="";
+        if(moved){ const dd=Math.round((mev.clientX-sx)/COLW); suppressClickUntil=Date.now()+300; if(dd!==0){ pushUndo(); p.start=p.start+dd; saveProject(p); sync("update",{id, due_date:ymd(p.start), deadline_date:ymd(p.start+p.len-1)}); } mount(); } };
+      document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
     });
   });
 }
@@ -909,7 +987,7 @@ function commitTitleEdit(cancel){
   el.textContent=val;
   if(val===(orig||"").trim()) return;
   const list=kind==="proj"?PROJECTS:TASKS; const it=list.find(x=>x.id===id);
-  if(it){ it.title=val; (kind==="proj"?saveProject:saveTask)(it); sync("update",{id, title:val}); }
+  if(it){ pushUndo(); it.title=val; (kind==="proj"?saveProject:saveTask)(it); sync("update",{id, title:val}); }
 }
 
 function renderSearch(){
@@ -1052,6 +1130,7 @@ document.addEventListener('click', async e=>{
   if(cbx){ e.stopPropagation(); const isProj=cbx.dataset.cbx==="proj"; const list=isProj?PROJECTS:TASKS;
     const it=list.find(x=>x.id===cbx.dataset.id);
     if(it){
+      pushUndo();
       if(!isProj && it.recurring && !it.done){
         /* recurring: completing advances to the next occurrence (Todoist rolls it forward) */
         if(Array.isArray(it.recDays) && it.recDays.length>1){ it.day=it.recDays[1]; it.recDays=it.recDays.slice(1); }
@@ -1073,6 +1152,12 @@ document.addEventListener('click', async e=>{
   /* inline title edit — click a task/project title on the timeline */
   const lbl=e.target.closest('.lbl[data-edit]');
   if(lbl){ if(Date.now()<suppressClickUntil) return; e.stopPropagation(); startTitleEdit(lbl); return; }
+  /* Day/Week/Biweekly/Month focus buttons */
+  const rb=e.target.closest('[data-range]');
+  if(rb){ focusRange(parseInt(rb.dataset.range,10)); return; }
+  /* undo / redo */
+  if(e.target.closest('#undoBtn')){ undo(); return; }
+  if(e.target.closest('#redoBtn')){ redo(); return; }
   /* add-button popup menu */
   if(e.target.closest('#openAddMenu')){ menuOpen=true; mount(); return; }
   if(e.target.id==="menuOverlay"){ menuOpen=false; mount(); return; }
@@ -1087,11 +1172,11 @@ document.addEventListener('click', async e=>{
   if(editTypeBtn){ captureEdit(); editDraft.type=editTypeBtn.dataset.edittype; if(editDraft.type==='project' && (!editDraft.len||editDraft.len<1)) editDraft.len=3; mount(); return; }
   if(e.target.closest('#editCancel') || e.target.id==="editOverlay"){ editOpen=false; editDraft=null; mount(); return; }
   if(e.target.closest('#editDelete')){ const id=editDraft.id; if(confirm('Delete this item? It will also be deleted in Todoist.')){ editOpen=false; editDraft=null;
-      PROJECTS=PROJECTS.filter(x=>x.id!==id); TASKS=TASKS.filter(x=>x.id!==id); mount();
+      pushUndo(); PROJECTS=PROJECTS.filter(x=>x.id!==id); TASKS=TASKS.filter(x=>x.id!==id); mount();
       pending++; sync('delete',{id}).finally(()=>{pending--;}); } return; }
   if(e.target.closest('#editSave')){
     captureEdit(); const d=editDraft; const isP=d.type==='project'; const id=d.id;
-    editOpen=false; editDraft=null;
+    editOpen=false; editDraft=null; pushUndo();
     /* apply locally & instantly; move item between task/project lists if the type changed */
     const cur=PROJECTS.find(x=>x.id===id)||TASKS.find(x=>x.id===id);
     const done=cur?cur.done:false;
@@ -1131,7 +1216,7 @@ document.addEventListener('click', async e=>{
     const isProject=addDraft.type==='project';
     let len=1; if(isProject){ len=parseInt(addDraft.len)||1; if(len<1) len=1; }
     const day=addDraft.day;
-    addOpen=false; addDraft=null;
+    addOpen=false; addDraft=null; pushUndo();
     /* optimistic: show it instantly with a temp id, reconcile once Todoist returns the real id */
     const tempId="tmp"+Date.now();
     const item=isProject ? {id:tempId, area, title, desc, start:day, len, done:false}
@@ -1242,8 +1327,11 @@ document.addEventListener('input', e=>{
 });
 
 document.addEventListener('change', e=>{
-  if(e.target.classList && e.target.classList.contains('sched-date')){ if(e.target.value) scheduleUnsched(e.target.dataset.usid, idxOfStr(e.target.value)); return; }
+  if(e.target.classList && e.target.classList.contains('sched-date')){ if(e.target.value){ pushUndo(); scheduleUnsched(e.target.dataset.usid, idxOfStr(e.target.value)); } return; }
   if(e.target.id==="themeToggle"){ applyTheme(e.target.checked?"dark":"light"); return; }
+  if(e.target.id==="prefPencil"){ pPencilOnly=e.target.checked; persistPref('tms_pencilOnly',pPencilOnly); return; }
+  if(e.target.id==="prefTap"){ pTapUndo=e.target.checked; persistPref('tms_tapUndo',pTapUndo); return; }
+  if(e.target.id==="prefFour"){ pFourFinger=e.target.checked; persistPref('tms_fourFinger',pFourFinger); return; }
   if(e.target.id==="fileUp"){ const f=e.target.files[0]; if(!f) return;
     const reader=new FileReader();
     reader.onload=()=>{ draft.cover=reader.result; draft._credit=""; draft.coverX=50; draft.coverY=50; draft.coverZoom=100; captureDraftFields(); mount(); };
@@ -1281,6 +1369,14 @@ function applyZoom(newColw, focalClientX){
   clearTimeout(zoomPersistT);
   zoomPersistT=setTimeout(()=>{ persistColw(); growForZoom(); }, 180);
 }
+/* Day / Week / Biweekly / Month buttons: zoom so N days fill the view, centered on today */
+function focusRange(days){
+  const sc=document.querySelector('.tl-scroll'); if(!sc) return;
+  COLW=Math.max(MINCOLW, Math.min(maxColw(), sc.clientWidth/days)); persistColw();
+  const need=Math.ceil(days*1.6/7)+2; if(win.weeks<need) win.weeks=need;
+  tlLeft=Math.max(0,(TODAY-win.start)*COLW - sc.clientWidth/2 + COLW/2);
+  mount();
+}
 /* make sure the rendered window has enough days to fill the viewport once zoomed out */
 function growForZoom(){
   const sc=document.querySelector('.tl-scroll'); if(!sc) return;
@@ -1315,6 +1411,23 @@ document.addEventListener('wheel', e=>{
     applyZoom(COLW * Math.exp(-e.deltaY*0.0015), e.clientX);
   }
 }, {passive:false});
+
+/* ---- iPad gestures: double/triple-tap undo/redo, four-finger focus mode ---- */
+let tapTimes=[], tdX=0, tdY=0, tdT=0;
+document.addEventListener('pointerdown', e=>{ tdX=e.clientX; tdY=e.clientY; tdT=Date.now(); }, true);
+document.addEventListener('pointerup', e=>{
+  if(!pTapUndo) return;
+  if(Math.abs(e.clientX-tdX)>8 || Math.abs(e.clientY-tdY)>8 || Date.now()-tdT>400){ tapTimes=[]; return; }
+  const t=e.target;
+  if(t.closest && (t.closest('.chip')||t.closest('.bar')||t.closest('button')||t.closest('input')||t.closest('.menu-pop')||t.closest('.search-box')||t.closest('.sched-drawer')||t.closest('.sidebar')||t.closest('[contenteditable="true"]'))){ tapTimes=[]; return; }
+  if(!(t.closest && t.closest('.tl-scroll'))) return;
+  const now=Date.now(); tapTimes=tapTimes.filter(x=>now-x<430); tapTimes.push(now);
+  if(tapTimes.length>=3){ tapTimes=[]; redo(); }
+  else if(tapTimes.length===2){ setTimeout(()=>{ if(tapTimes.length===2){ tapTimes=[]; undo(); } }, 290); }
+});
+let fourCand=false, fourT=0;
+document.addEventListener('touchstart', e=>{ if(pFourFinger && e.touches.length===4){ fourCand=true; fourT=Date.now(); } }, {passive:true});
+document.addEventListener('touchend', e=>{ if(pFourFinger && fourCand && e.touches.length===0){ if(Date.now()-fourT<700){ focusMode=!focusMode; applyFocusMode(); } fourCand=false; } });
 
 /* ---------- Supabase persistence ---------- */
 function areaToRow(key,a){return {id:key, name:a.name, emoji:a.emoji||"", graded:!!a.graded, color:a.color, tint:a.tint, ink:a.ink,
