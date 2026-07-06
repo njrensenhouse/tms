@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TMS</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSI1OCIgaGVpZ2h0PSI1OCIgcng9IjE1IiBmaWxsPSIjMEIwQjBEIi8+CjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwLjEiIHgyPSIxIiB5Mj0iMC45Ij4KPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMkU2QkZGIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNkU4MkQ4Ii8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+CjxwYXRoIGQ9Ik00MC40NSAxMy44NyBBIDIwIDIwIDAgMSAxIDIzLjU1IDEzLjg3IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZykiIHN0cm9rZS13aWR0aD0iNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CjxwYXRoIGQ9Ik0zMiAzMiBMMzIgMTkiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZmZmZiIgc3Ryb2tlLXdpZHRoPSIzLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8cGF0aCBkPSJNMzIgMzIgTDQyIDQ0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMy4zIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMS43IiBmaWxsPSIjZmZmZmZmIi8+Cjwvc3ZnPgo=">
+<link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSI1OCIgaGVpZ2h0PSI1OCIgcng9IjE1IiBmaWxsPSIjMEIwQjBEIi8+CjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwLjEiIHgyPSIxIiB5Mj0iMC45Ij4KPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMkU2QkZGIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNkU4MkQ4Ii8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+CjxwYXRoIGQ9Ik00MC40NSAxMy44NyBBIDIwIDIwIDAgMSAxIDIzLjU1IDEzLjg3IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZykiIHN0cm9rZS13aWR0aD0iNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CjxwYXRoIGQ9Ik0zMiAzMiBMMzIgMTkiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZmZmZiIgc3Ryb2tlLXdpZHRoPSIzLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8cGF0aCBkPSJNMzIgMzIgTDQyIDQ0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMy4zIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMS43IiBmaWxsPSIjZmZmZmZmIi8+Cjwvc3ZnPgo=">
 <style>
   :root{
     /* dark theme (default) */
@@ -47,6 +49,9 @@
   .tl-wrap{background:var(--surface); border:0.5px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; display:flex; flex-direction:column; min-height:0;}
   .tl-scroll{overflow:auto; flex:1 1 auto; touch-action:pan-x pan-y;}
   .tl-inner{position:relative;}
+  /* never let a drag (esp. Apple Pencil) select text on the timeline */
+  .tl-inner{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  .tl-inner input, .tl-inner textarea, .lbl[contenteditable="true"]{ -webkit-user-select:text; user-select:text; }
   .wk-head{display:grid; border-bottom:0.5px solid var(--line2);}
   .wk-head > div{padding:9px 14px; font-weight:500; font-size:13px; color:var(--ink); border-right:0.5px solid var(--line);}
   .wk-head > div:last-child{border-right:none;}
