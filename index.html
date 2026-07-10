@@ -73,7 +73,8 @@
   .day-col{padding:0 4px; display:flex; flex-direction:column; gap:5px;}
   .chip{border-radius:8px; border:0.5px solid; padding:5px 6px; font-size:11.5px; line-height:1.25;
     cursor:pointer; display:flex; gap:5px; align-items:flex-start;}
-  .chip .lbl{flex:1 1 auto;}
+  /* one-line titles so every card is the same height at a given zoom (predictable + easy to reorder) */
+  .chip .lbl{flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .chip.done .lbl{text-decoration:line-through; opacity:.5;}
   .cbx{flex:0 0 auto; width:14px; height:14px; border-radius:4px; border:1px solid currentColor; margin-top:1px;
     cursor:pointer; display:flex; align-items:center; justify-content:center; opacity:.6;}
@@ -246,8 +247,10 @@
   .bar{ touch-action:none; }
   .side-btn.dim{ opacity:.32; }
   .chip-ph{ flex:0 0 auto; height:34px; border:2px dashed var(--ink); border-radius:8px; opacity:.85; box-sizing:border-box; }
-  .chip.dragging-src{ display:none; }
+  .chip.dragging-src{ visibility:hidden; }
   body.card-dragging{ cursor:grabbing; }
+  /* pencil-only mode: fingers scroll & pinch even over cards (the pen still drags them) */
+  body.pen-mode .chip, body.pen-mode .bar{ touch-action:auto; }
   .range-btns{ display:flex; gap:6px; }
   .range-btn{ font:inherit; font-size:12px; padding:4px 11px; border-radius:8px; border:0.5px solid var(--line); background:transparent; color:var(--faint); cursor:pointer; }
   .range-btn:hover{ color:var(--ink); border-color:var(--line2); }
@@ -471,7 +474,7 @@ function resyncStates(fromS, toS){
     if(o.title!==n.title){ sync("update",{id, title:n.title}); ch=true; }
     if(o.area!==n.area){ sync("update",{id, area:n.area}); ch=true; }
     if(!!o.done!==!!n.done){ sync(n.done?"complete":"reopen",{id}); ch=true; }
-    if(ch || !oT[id]) saveTask(n);
+    if(ch || !oT[id] || o.ord!==n.ord) saveTask(n);
   }
   for(const id in oT){ if(!nT[id]){ sync("delete",{id}); SB.from('tasks').delete().eq('id',id); } }
   for(const id in nP){ const n=nP[id], o=oP[id]||{}; let ch=false;
@@ -493,6 +496,8 @@ try{ pTapUndo=localStorage.getItem('tms_tapUndo')==='1'; }catch(e){}
 try{ pFourFinger=localStorage.getItem('tms_fourFinger')==='1'; }catch(e){}
 function persistPref(k,v){ try{ localStorage.setItem(k, v?'1':'0'); }catch(e){} }
 function applyFocusMode(){ document.body.classList.toggle('focus-mode', focusMode); }
+function applyPenMode(){ document.body.classList.toggle('pen-mode', pPencilOnly); }
+applyPenMode();
 
 let searchOpen=false, searchQ="";
 let settingsOpen=false;
@@ -801,7 +806,7 @@ function scheduleUnsched(id, idx){
   /* optimistic: drop it onto the timeline instantly, then reconcile with Todoist */
   UNSCHED=UNSCHED.filter(x=>x.id!==id);
   if(u.isProject){ PROJECTS.push({id, area:u.area, title:u.title, desc:"", start:idx, len:SCHED_PROJ_LEN, done:false, recurring:false}); }
-  else { TASKS.push({id, area:u.area, title:u.title, desc:"", day:idx, done:false, recurring:false, recDays:[]}); }
+  else { TASKS.push({id, area:u.area, title:u.title, desc:"", day:idx, done:false, recurring:false, recDays:[], ord:0}); }
   mount();
   pending++;
   sync("update",{id, due_date:ymd(idx), deadline_date:u.isProject?ymd(idx+SCHED_PROJ_LEN-1):undefined})
@@ -931,22 +936,46 @@ function chipPreview(a, title){
   c.innerHTML=`${a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:''}<span class="dc-lbl">${(title||'').replace(/</g,'&lt;')}</span>`;
   return c;
 }
-/* shared card drag: floating preview + a white-outline placeholder that pushes the target day's cards down */
+/* shared card drag: floating preview + a white-outline placeholder that drops exactly where you release,
+   with the other cards in that day sliding aside to make room */
 function beginCardDrag(ev, cfg){
-  const sx=ev.clientX, sy=ev.clientY; let dragging=false, card=null, ph=null, phCol=null;
-  const removePh=()=>{ if(ph&&ph.parentNode) ph.parentNode.removeChild(ph); phCol=null; };
-  const placePh=(x,y)=>{ const under=document.elementFromPoint(x,y); const col=under&&under.closest?under.closest('.day-col[data-day]'):null;
-    if(col!==phCol){ removePh(); if(col){ if(!ph){ ph=document.createElement('div'); ph.className='chip-ph'; } col.insertBefore(ph, col.firstChild); phCol=col; } } };
+  const sx=ev.clientX, sy=ev.clientY; let dragging=false, card=null, ph=null, phCol=null, phBeforeId=null;
+  const phH = cfg.sourceEl ? Math.round(cfg.sourceEl.getBoundingClientRect().height) : 34;
+  const removePh=()=>{ if(ph&&ph.parentNode) ph.parentNode.removeChild(ph); };
+  const placePh=(x,y)=>{
+    removePh();
+    const under=document.elementFromPoint(x,y);
+    const col=under&&under.closest?under.closest('.day-col[data-day]'):null;
+    if(!col){ phCol=null; phBeforeId=null; return; }
+    const chips=[...col.querySelectorAll('.chip[data-task-id]')].filter(c=>!c.classList.contains('dragging-src'));
+    let ref=null;
+    for(const c of chips){ const r=c.getBoundingClientRect(); if(y < r.top + r.height/2){ ref=c; break; } }
+    if(!ph){ ph=document.createElement('div'); ph.className='chip-ph'; ph.style.height=phH+'px'; }
+    col.insertBefore(ph, ref || col.querySelector('.cell-add'));
+    phCol=col; phBeforeId=ref?ref.dataset.taskId:null;
+  };
   const startDrag=()=>{ dragging=true; document.body.classList.add('card-dragging'); if(cfg.fromUnsched) document.body.classList.add('sched-dragging'); if(cfg.sourceEl) cfg.sourceEl.classList.add('dragging-src');
     card=chipPreview(cfg.a, cfg.title); document.body.appendChild(card); };
   const move=mev=>{ if(!dragging){ if(Math.abs(mev.clientX-sx)>5||Math.abs(mev.clientY-sy)>5) startDrag(); else return; }
     card.style.transform=`translate(calc(${mev.clientX}px - 50%), calc(${mev.clientY}px - 130%))`; placePh(mev.clientX, mev.clientY); };
   const up=mev=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
     document.body.classList.remove('card-dragging','sched-dragging'); if(cfg.sourceEl) cfg.sourceEl.classList.remove('dragging-src');
-    const col=phCol; removePh(); if(card) card.remove();
-    if(dragging){ suppressClickUntil=Date.now()+300; if(col) cfg.onDrop(parseInt(col.dataset.day,10)); else if(cfg.onCancel) cfg.onCancel(); }
+    const col=phCol, beforeId=phBeforeId; removePh(); if(card) card.remove();
+    if(dragging){ suppressClickUntil=Date.now()+300; if(col) cfg.onDrop(parseInt(col.dataset.day,10), beforeId); else if(cfg.onCancel) cfg.onCancel(); }
   };
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+}
+/* move a task to a day, inserting it before `beforeId` (or at the end), and renumber affected days */
+function renumberDay(day){ let o=0; TASKS.forEach(x=>{ if(x.day===day) x.ord=o++; }); }
+function moveTaskTo(t, day, beforeId){
+  const oldDay=t.day; t.day=day;
+  TASKS=TASKS.filter(x=>x!==t);
+  let at;
+  if(beforeId){ at=TASKS.findIndex(x=>x.id===beforeId); if(at<0) at=TASKS.length; }
+  else { let last=-1; TASKS.forEach((x,i)=>{ if(x.day===day) last=i; }); at=(last<0?TASKS.length:last+1); }
+  TASKS.splice(at,0,t);
+  renumberDay(day); if(oldDay!==day) renumberDay(oldDay);
+  return oldDay;
 }
 /* drag task chips (change date) and project bars (move start date) */
 function initChips(){
@@ -956,8 +985,16 @@ function initChips(){
       if(pPencilOnly && ev.pointerType!=='pen') return;
       const id=ch.dataset.taskId; const t=TASKS.find(x=>x.id===id); if(!t) return;
       ev.preventDefault();
+      if(ev.pointerType==='pen'){ try{ ch.setPointerCapture(ev.pointerId); }catch(e){} }
       const a=AREAS[t.area]||{};
-      beginCardDrag(ev, {a, title:t.title, sourceEl:ch, onDrop:day=>{ if(day!==t.day){ pushUndo(); t.day=day; saveTask(t); sync("update",{id, due_date:ymd(day)}); } mount(); }});
+      beginCardDrag(ev, {a, title:t.title, sourceEl:ch, onDrop:(day, beforeId)=>{
+        const dayChanged=(day!==t.day);
+        pushUndo();
+        const oldDay=moveTaskTo(t, day, beforeId);
+        if(dayChanged) sync("update",{id, due_date:ymd(day)});
+        TASKS.filter(x=>x.day===day || (dayChanged && x.day===oldDay)).forEach(saveTask);  // persist new order
+        mount();
+      }});
     });
   });
   document.querySelectorAll('.bar[data-pid]').forEach(bar=>{
@@ -967,6 +1004,7 @@ function initChips(){
       if(pPencilOnly && ev.pointerType!=='pen') return;
       const id=bar.dataset.pid; const p=PROJECTS.find(x=>x.id===id); if(!p) return;
       ev.preventDefault();
+      if(ev.pointerType==='pen'){ try{ bar.setPointerCapture(ev.pointerId); }catch(e){} }
       const sx=ev.clientX, baseLeft=(p.start-win.start)*COLW; let moved=false;
       const move=mev=>{ const dx=mev.clientX-sx; if(!moved && Math.abs(dx)>5){ moved=true; bar.style.zIndex="6"; bar.style.opacity=".9"; } if(moved) bar.style.left=(baseLeft+dx)+"px"; };
       const up=mev=>{ document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); bar.style.zIndex=""; bar.style.opacity="";
@@ -1188,7 +1226,7 @@ document.addEventListener('click', async e=>{
     PROJECTS=PROJECTS.filter(x=>x.id!==id); TASKS=TASKS.filter(x=>x.id!==id);
     const areaChanged=(d.oarea!==undefined && d.oarea!==d.area);
     if(isP){ const item={id, area:d.area, title:d.title, desc:d.desc||"", start:d.start, len:Math.max(1,d.len||1), done}; PROJECTS.push(item); saveProject(item); }
-    else { const item={id, area:d.area, title:d.title, desc:d.desc||"", day:d.start, done}; TASKS.push(item); saveTask(item); }
+    else { const item={id, area:d.area, title:d.title, desc:d.desc||"", day:d.start, done, ord:0}; TASKS.push(item); saveTask(item); }
     mount();
     pending++;
     sync('update',{id, title:d.title, description:d.desc||"", ...(areaChanged?{area:d.area}:{}), due_date:ymd(d.start), deadline_date:isP?ymd(d.start+(d.len>0?d.len-1:0)):undefined, set_project:isP})
@@ -1225,7 +1263,7 @@ document.addEventListener('click', async e=>{
     /* optimistic: show it instantly with a temp id, reconcile once Todoist returns the real id */
     const tempId="tmp"+Date.now();
     const item=isProject ? {id:tempId, area, title, desc, start:day, len, done:false}
-                         : {id:tempId, area, title, desc, day, done:false};
+                         : {id:tempId, area, title, desc, day, done:false, ord:0};
     (isProject?PROJECTS:TASKS).push(item);
     lastArea=area; persistLastArea();
     mount();
@@ -1334,7 +1372,7 @@ document.addEventListener('input', e=>{
 document.addEventListener('change', e=>{
   if(e.target.classList && e.target.classList.contains('sched-date')){ if(e.target.value){ pushUndo(); scheduleUnsched(e.target.dataset.usid, idxOfStr(e.target.value)); } return; }
   if(e.target.id==="themeToggle"){ applyTheme(e.target.checked?"dark":"light"); return; }
-  if(e.target.id==="prefPencil"){ pPencilOnly=e.target.checked; persistPref('tms_pencilOnly',pPencilOnly); return; }
+  if(e.target.id==="prefPencil"){ pPencilOnly=e.target.checked; persistPref('tms_pencilOnly',pPencilOnly); applyPenMode(); return; }
   if(e.target.id==="prefTap"){ pTapUndo=e.target.checked; persistPref('tms_tapUndo',pTapUndo); return; }
   if(e.target.id==="prefFour"){ pFourFinger=e.target.checked; persistPref('tms_fourFinger',pFourFinger); return; }
   if(e.target.id==="fileUp"){ const f=e.target.files[0]; if(!f) return;
@@ -1374,12 +1412,12 @@ function applyZoom(newColw, focalClientX){
   clearTimeout(zoomPersistT);
   zoomPersistT=setTimeout(()=>{ persistColw(); growForZoom(); }, 180);
 }
-/* Day / Week / Biweekly / Month buttons: zoom so N days fill the view, centered on today */
+/* Day / Week / Biweekly / Month buttons: zoom so N days fill the view, starting on today and looking forward */
 function focusRange(days){
   const sc=document.querySelector('.tl-scroll'); if(!sc) return;
   COLW=Math.max(MINCOLW, Math.min(maxColw(), sc.clientWidth/days)); persistColw();
   const need=Math.ceil(days*1.6/7)+2; if(win.weeks<need) win.weeks=need;
-  tlLeft=Math.max(0,(TODAY-win.start)*COLW - sc.clientWidth/2 + COLW/2);
+  tlLeft=Math.max(0,(TODAY-win.start)*COLW - 2);   // today at the left edge, next N days ahead
   mount();
 }
 /* make sure the rendered window has enough days to fill the viewport once zoomed out */
@@ -1439,7 +1477,7 @@ function areaToRow(key,a){return {id:key, name:a.name, emoji:a.emoji||"", graded
   cover:a.cover||"", cover_x:a.coverX==null?50:a.coverX, cover_y:a.coverY==null?50:a.coverY, cover_zoom:a.coverZoom==null?100:a.coverZoom,
   credit:a.credit||"", note:a.note||"", grades:a.grades||[]};}
 function projToRow(p){return {id:p.id, area:p.area, title:p.title, description:p.desc||"", start_day:p.start, len:p.len, done:!!p.done, recurring:!!p.recurring};}
-function taskToRow(t){return {id:t.id, area:t.area, title:t.title, description:t.desc||"", day:t.day, done:!!t.done, recurring:!!t.recurring, rec_days:Array.isArray(t.recDays)?t.recDays:[]};}
+function taskToRow(t){return {id:t.id, area:t.area, title:t.title, description:t.desc||"", day:t.day, done:!!t.done, recurring:!!t.recurring, rec_days:Array.isArray(t.recDays)?t.recDays:[], ord:t.ord||0};}
 
 async function saveArea(key){ if(!AREAS[key]) return; const {error}=await SB.from('areas').upsert(areaToRow(key,AREAS[key])); if(error) console.error('saveArea', error); }
 async function saveProject(p){ const {error}=await SB.from('projects').upsert(projToRow(p)); if(error) console.error('saveProject', error); }
@@ -1458,7 +1496,7 @@ async function loadData(){
   const [aRes,pRes,tRes]=await Promise.all([
     SB.from('areas').select('*').order('sort_order').order('created_at'),
     SB.from('projects').select('*').order('created_at'),
-    SB.from('tasks').select('*').order('created_at'),
+    SB.from('tasks').select('*').order('day').order('ord').order('created_at'),
   ]);
   if(aRes.error) throw aRes.error; if(pRes.error) throw pRes.error; if(tRes.error) throw tRes.error;
   AREAS={};
@@ -1466,7 +1504,7 @@ async function loadData(){
     cover:a.cover||"", coverX:a.cover_x, coverY:a.cover_y, coverZoom:a.cover_zoom, credit:a.credit||"", note:a.note||"",
     grades:Array.isArray(a.grades)?a.grades:[]}; });
   PROJECTS=(pRes.data||[]).map(p=>({id:p.id, area:p.area, title:p.title, desc:p.description||"", start:p.start_day, len:p.len, done:p.done, recurring:!!p.recurring}));
-  TASKS=(tRes.data||[]).map(t=>({id:t.id, area:t.area, title:t.title, desc:t.description||"", day:t.day, done:t.done, recurring:!!t.recurring, recDays:Array.isArray(t.rec_days)?t.rec_days:[]}));
+  TASKS=(tRes.data||[]).map(t=>({id:t.id, area:t.area, title:t.title, desc:t.description||"", day:t.day, done:t.done, recurring:!!t.recurring, recDays:Array.isArray(t.rec_days)?t.rec_days:[], ord:t.ord||0}));
   try{ const uRes=await SB.from('unscheduled').select('*').order('created_at'); UNSCHED=(uRes.data||[]).map(u=>({id:u.id, area:u.area, title:u.title, isProject:u.is_project})); }catch(e){ UNSCHED=[]; }
 }
 
@@ -1483,7 +1521,7 @@ async function syncPull(){ const r=await sync("pull"); if(r && r.error) console.
 function dataSig(){ return JSON.stringify([
   Object.keys(AREAS).sort(),
   PROJECTS.map(p=>[p.id,p.area,p.title,p.start,p.len,p.done]),
-  TASKS.map(t=>[t.id,t.area,t.title,t.day,t.done]),
+  TASKS.map(t=>[t.id,t.area,t.title,t.day,t.done,t.ord]),
   UNSCHED.length ]); }
 /* true when the user is mid-interaction and a silent re-render would be disruptive */
 function uiBusy(){ return searchOpen||settingsOpen||addOpen||editOpen||schedOpen||menuOpen||!!editing||!!draft; }
