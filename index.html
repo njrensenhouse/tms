@@ -9,7 +9,7 @@
 <style>
   :root{
     /* dark theme (default) */
-    --bg:#1A1815; --surface:#242220; --ink:#ECE9E2; --muted:#A39E95; --faint:#736E66;
+    --bg:#1A1815; --surface:#242220; --card:#322E29; --ink:#ECE9E2; --muted:#A39E95; --faint:#736E66;
     --line:rgba(255,255,255,0.10); --line2:rgba(255,255,255,0.16);
     --today:rgba(255,255,255,0.07); --today-ink:#C8C3BA; --primary-ink:#34C88C;
     --radius:10px; --radius-lg:14px;
@@ -17,7 +17,7 @@
     --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   }
   :root[data-theme="light"]{
-    --bg:#FBFAF7; --surface:#FFFFFF; --ink:#23211C; --muted:#6B6862; --faint:#9A968E;
+    --bg:#FBFAF7; --surface:#FFFFFF; --card:#EFEDE8; --ink:#23211C; --muted:#6B6862; --faint:#9A968E;
     --line:rgba(35,33,28,0.10); --line2:rgba(35,33,28,0.18);
     --today:rgba(35,33,28,0.055); --today-ink:#6B6862; --primary-ink:#0F6E56;
   }
@@ -81,6 +81,16 @@
   .cbx svg{width:9px; height:9px; display:none;}
   .cbx.on{opacity:1;} .cbx.on svg{display:block;}
   .bar .cbx{margin-top:0;}
+  /* task cards use the vibrant area color (--ac) only for the checkbox + edit icon; the card itself is neutral gray */
+  .chip .cbx{ border-color:var(--ac); color:var(--ac); opacity:.9; }
+  .chip .edit-btn{ color:var(--ac); opacity:.5; }
+  .chip .edit-btn:hover{ opacity:1; }
+  /* completion animation: fill the box, draw the check, strike the title, then fade out */
+  .chip.completing, .bar.completing{ transition:opacity .34s ease, transform .34s ease; opacity:.35; }
+  .chip.completing .lbl, .bar.completing .lbl{ text-decoration:line-through; opacity:.5; transition:opacity .2s; }
+  .chip.completing .cbx, .bar.completing .cbx{ background:var(--ac); border-color:var(--ac); color:#fff; opacity:1; }
+  .chip.completing .cbx svg, .bar.completing .cbx svg{ display:block; animation:checkpop .24s ease; }
+  @keyframes checkpop{ from{ transform:scale(.3); opacity:.2; } to{ transform:scale(1); opacity:1; } }
 
   .rail{display:flex; flex-direction:column; min-height:0; overflow:hidden;}
   .rail-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; padding-left:2px; flex:0 0 auto;}
@@ -174,6 +184,7 @@
   .sr-meta{font-size:11px; color:var(--faint); margin-top:2px;}
   .sr-dot{width:9px; height:9px; border-radius:3px; flex:0 0 auto;}
   .sr-empty{padding:22px 14px; color:var(--faint); font-size:13px; text-align:center;}
+  .sr-recent-h{padding:9px 14px 5px; font-size:11px; letter-spacing:.05em; color:var(--faint); text-transform:uppercase;}
   .danger-btn{margin-top:12px; width:100%; background:none; border:0.5px solid #D4537E; color:#E07B9E; border-radius:9px; padding:9px; font:inherit; font-size:13px; cursor:pointer;}
   .danger-btn:active{transform:scale(.99);}
 
@@ -249,8 +260,8 @@
   .chip-ph{ flex:0 0 auto; height:34px; border:2px dashed var(--ink); border-radius:8px; opacity:.85; box-sizing:border-box; }
   .chip.dragging-src{ visibility:hidden; }
   body.card-dragging{ cursor:grabbing; }
-  /* pencil-only mode: fingers scroll & pinch even over cards (the pen still drags them) */
-  body.pen-mode .chip, body.pen-mode .bar{ touch-action:auto; }
+  /* cards keep touch-action:none so the Apple Pencil drags them instantly without the browser hijacking it to scroll.
+     In pencil-only mode, one-finger scrolling over a card is handled by a custom pan (see initTimeline). */
   .range-btns{ display:flex; gap:6px; }
   .range-btn{ font:inherit; font-size:12px; padding:4px 11px; border-radius:8px; border:0.5px solid var(--line); background:transparent; color:var(--faint); cursor:pointer; }
   .range-btn:hover{ color:var(--ink); border-color:var(--line2); }
@@ -459,6 +470,11 @@ function persistRail(){ try{ localStorage.setItem('tms_railOpen', railOpen?'1':'
 /* remember the last area used when adding, and default to it next time */
 let lastArea=null; try{ lastArea=localStorage.getItem('tms_lastArea')||null; }catch(e){}
 function persistLastArea(){ try{ if(lastArea) localStorage.setItem('tms_lastArea', lastArea); }catch(e){} }
+/* recently completed items (kept locally so search can show them even after Todoist archives them) */
+let recentDone=[]; try{ recentDone=JSON.parse(localStorage.getItem('tms_recentDone')||'[]'); if(!Array.isArray(recentDone)) recentDone=[]; }catch(e){ recentDone=[]; }
+function persistRecentDone(){ try{ localStorage.setItem('tms_recentDone', JSON.stringify(recentDone.slice(0,20))); }catch(e){} }
+function logDone(it){ recentDone=recentDone.filter(x=>x.id!==it.id); recentDone.unshift({id:it.id, title:it.title, area:it.area, ts:Date.now()}); if(recentDone.length>20) recentDone.length=20; persistRecentDone(); }
+function unlogDone(id){ recentDone=recentDone.filter(x=>x.id!==id); persistRecentDone(); }
 let pending=0;   // outstanding optimistic writes — pause background sync while >0
 
 /* ---- undo / redo (full local snapshots + a diff resync to Todoist/Supabase) ---- */
@@ -474,7 +490,7 @@ function resyncStates(fromS, toS){
     if(o.title!==n.title){ sync("update",{id, title:n.title}); ch=true; }
     if(o.area!==n.area){ sync("update",{id, area:n.area}); ch=true; }
     if(!!o.done!==!!n.done){ sync(n.done?"complete":"reopen",{id}); ch=true; }
-    if(ch || !oT[id] || o.ord!==n.ord) saveTask(n);
+    if(ch || !oT[id]) saveTask(n);
   }
   for(const id in oT){ if(!nT[id]){ sync("delete",{id}); SB.from('tasks').delete().eq('id',id); } }
   for(const id in nP){ const n=nP[id], o=oP[id]||{}; let ch=false;
@@ -552,14 +568,14 @@ function renderTimeline(){
       const a=AREAS[t.area];
       const em=a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:'';
       const rep=t.recurring?`<span class="rep">${ICON.repeat}</span>`:'';
-      return `<div class="chip" data-task-id="${t.id}" style="background:${a.tint}; border-color:${a.color}; color:${a.ink}; --ac:${a.color};">
+      return `<div class="chip" data-task-id="${t.id}" style="background:var(--card); border-color:var(--line2); color:var(--ink); --ac:${a.color};">
         <div class="chip-top"><div class="ct-left"><span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span>${em}${rep}</div><button class="edit-btn" data-editbtn data-kind="task" data-id="${t.id}" aria-label="Edit">${ICON.pencil}</button></div>
         <span class="lbl" data-edit data-kind="task" data-id="${t.id}">${t.title}</span></div>`;
     }).join("");
     const ghosts=(ghostsByDay[idx]||[]).map(t=>{
       const a=AREAS[t.area];
       const em=a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:'';
-      return `<div class="chip ghost" style="border-color:${a.color}; color:${a.ink}; --ac:${a.color};" title="Recurring — upcoming">
+      return `<div class="chip ghost" style="background:var(--card); border-color:var(--line2); color:var(--ink); --ac:${a.color};" title="Recurring — upcoming">
         <div class="chip-top"><div class="ct-left">${em}<span class="rep">${ICON.repeat}</span></div></div>
         <span class="lbl">${t.title}</span></div>`;
     }).join("");
@@ -932,7 +948,7 @@ function initDivider(){
 /* a floating preview that looks like the final chip */
 function chipPreview(a, title){
   const c=document.createElement('div'); c.className='drag-card';
-  c.style.background=a.tint||'var(--surface)'; c.style.borderColor=a.color||'var(--line2)'; c.style.color=a.ink||'var(--ink)';
+  c.style.background='var(--card)'; c.style.borderColor=a.color||'var(--line2)'; c.style.color='var(--ink)';
   c.innerHTML=`${a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:''}<span class="dc-lbl">${(title||'').replace(/</g,'&lt;')}</span>`;
   return c;
 }
@@ -1042,7 +1058,12 @@ function renderSearch(){
 }
 function renderSearchResults(){
   const q=(searchQ||'').trim().toLowerCase();
-  if(!q) return `<div class="sr-empty">Type to search across all tasks and projects — including completed ones.</div>`;
+  if(!q){
+    if(!recentDone.length) return `<div class="sr-empty">Type to search across all tasks and projects — including completed ones.</div>`;
+    const recent=recentDone.slice(0,8).map(rd=>{ const a=AREAS[rd.area]||{};
+      return `<div class="sr-row done"><span class="cbx on" data-reopen data-id="${rd.id}" style="color:${a.color||'#888'}" title="Reopen">${ICON.check}</span><span class="sr-dot" style="background:${a.color||'#888'}"></span><div class="sr-main"><div class="sr-title">${a.emoji?a.emoji+' ':''}${rd.title}</div><div class="sr-meta">Completed · ${a.name||'—'}</div></div></div>`; }).join("");
+    return `<div class="sr-recent-h">Recently completed</div>${recent}`;
+  }
   const rows=[];
   PROJECTS.filter(p=>(p.title||'').toLowerCase().includes(q)).forEach(p=>{ const a=AREAS[p.area]||{};
     rows.push(`<div class="sr-row ${p.done?'done':''}"><span class="cbx ${p.done?'on':''}" data-scbx="proj" data-id="${p.id}" style="color:${a.color||'#888'}">${ICON.check}</span><span class="sr-dot" style="background:${a.color||'#888'}"></span><div class="sr-main"><div class="sr-title">${a.emoji?a.emoji+' ':''}${p.title}</div><div class="sr-meta">Project · ${a.name||'—'} · ${fmtDay(p.start)} – ${fmtDay(p.start+p.len-1)}</div></div></div>`); });
@@ -1069,6 +1090,25 @@ function initTimeline(){
     if(sc.scrollLeft+sc.clientWidth > totalW - COLW*4){ lastGrow=now; win.weeks+=4; mount(); }
     else if(sc.scrollLeft < COLW*4){ lastGrow=now; win.start-=28; win.weeks+=4; tlLeft+=28*COLW; mount(); }
   });
+  /* pencil-only mode: cards are touch-action:none so the Pencil drags them instantly.
+     That means a finger on a card no longer scrolls natively, so we pan the timeline ourselves. */
+  let panT=null;
+  sc.addEventListener('pointerdown', ev=>{
+    if(!pPencilOnly || ev.pointerType!=='touch') return;
+    if(!(ev.target.closest && (ev.target.closest('.chip')||ev.target.closest('.bar')))) return;  // empty gaps keep native (inertial) scroll
+    panT={id:ev.pointerId, x:ev.clientX, y:ev.clientY, sl:sc.scrollLeft, st:sc.scrollTop};
+    try{ sc.setPointerCapture(ev.pointerId); }catch(e){}
+  });
+  sc.addEventListener('pointermove', ev=>{
+    if(!panT || ev.pointerId!==panT.id) return;
+    if(pinch){ panT=null; return; }                     // yield to a 2-finger pinch-zoom
+    sc.scrollLeft=panT.sl-(ev.clientX-panT.x);
+    sc.scrollTop =panT.st-(ev.clientY-panT.y);
+    tlLeft=sc.scrollLeft; updateTodayFab(sc);
+  });
+  const endPan=ev=>{ if(panT && ev.pointerId===panT.id) panT=null; };
+  sc.addEventListener('pointerup', endPan);
+  sc.addEventListener('pointercancel', endPan);
   initBars();
   initChips();
   initDivider();
@@ -1180,14 +1220,28 @@ document.addEventListener('click', async e=>{
         mount(); saveTask(it);
         pending++; sync("complete",{id:it.id}).then(()=>syncPull()).then(()=>{ if(view.page==="timeline" && !uiBusy()) mount(); }).finally(()=>{ pending--; });
       } else {
-        it.done=!it.done; mount(); (isProj?saveProject:saveTask)(it); sync(it.done?"complete":"reopen",{id:it.id});
+        const willComplete = !it.done;
+        it.done=willComplete;                                   // optimistic: data changes now
+        (isProj?saveProject:saveTask)(it); sync(willComplete?"complete":"reopen",{id:it.id});
+        if(willComplete){
+          logDone(it);
+          const el=cbx.closest('.chip')||cbx.closest('.bar');   // animate the box + strike, then remove
+          if(el){ el.classList.add('completing'); setTimeout(()=>{ if(view.page==="timeline" && !uiBusy()) mount(); }, 360); }
+          else mount();
+        } else { unlogDone(it.id); mount(); }
       }
     } return; }
+  /* reopen a recently-completed item from the search panel */
+  const rop=e.target.closest('[data-reopen]');
+  if(rop){ const id=rop.dataset.id; unlogDone(id); sync("reopen",{id});
+    pending++; syncPull().then(()=>{ if(searchOpen){ const rs=document.getElementById('searchResults'); if(rs) rs.innerHTML=renderSearchResults(); } }).finally(()=>{ pending--; });
+    const rs=document.getElementById('searchResults'); if(rs) rs.innerHTML=renderSearchResults(); return; }
   /* search result checkbox — toggle done inline (incl. un-completing) */
   const scbx=e.target.closest('[data-scbx]');
   if(scbx){ const tp=scbx.dataset.scbx; const list=tp==="proj"?PROJECTS:TASKS;
     const it=list.find(x=>x.id===scbx.dataset.id);
     if(it){ it.done=!it.done; (tp==="proj"?saveProject:saveTask)(it); sync(it.done?"complete":"reopen",{id:it.id});
+      if(it.done) logDone(it); else unlogDone(it.id);
       const rs=document.getElementById('searchResults'); if(rs) rs.innerHTML=renderSearchResults(); } return; }
   /* edit button → edit popup */
   const eb=e.target.closest('[data-editbtn]');
