@@ -326,6 +326,12 @@
   .sched-hint{ padding:10px 14px; font-size:11px; color:var(--faint); border-top:0.5px solid var(--line); }
   .sched-ghost{ position:fixed; z-index:200; pointer-events:none; background:var(--surface); border:0.5px solid var(--line2); border-radius:8px; padding:5px 9px; font-size:12px; box-shadow:0 6px 20px rgba(0,0,0,.3); }
 
+  /* multi-select tasks + bulk-edit panel */
+  .icon-btn.active{ background:var(--ink); color:var(--surface); border-color:var(--ink); }
+  .tl-inner.selecting .chip[data-task-id]{ cursor:pointer; }
+  .select-panel{ position:fixed; right:0; top:0; bottom:0; width:300px; max-width:86vw; background:var(--surface); border-left:0.5px solid var(--line2); box-shadow:-6px 0 24px rgba(0,0,0,.28); z-index:95; display:flex; flex-direction:column; }
+  .select-panel .field{ margin-bottom:14px; }
+
   @media (max-width:820px){
     .main{grid-template-columns:1fr;}
     .rail{order:-1;}
@@ -383,6 +389,7 @@ const ICON = {
   folder:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
   undo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>',
   redo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg>',
+  select:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3.5" width="7" height="7" rx="1.5"/><rect x="14" y="3.5" width="7" height="7" rx="1.5"/><rect x="3" y="14.5" width="7" height="7" rx="1.5"/><path d="M15.5 18l2 2 3.5-4"/></svg>',
 };
 
 /* quick-pick emojis for area identification (any typed/pasted emoji also works) */
@@ -522,6 +529,7 @@ let addOpen=false, addDraft=null;   // quick-add (click a date)
 let editing=null, suppressClickUntil=0;   // inline title edit + chip drag
 let editOpen=false, editDraft=null;        // edit-item popup
 let schedOpen=false, UNSCHED=[];           // undated-item scheduler
+let selectMode=false, selectedTasks=new Set();   // multi-select tasks for bulk edit
 
 let view={page:"timeline", area:null};
 /* working draft used by the shared add/edit form */
@@ -568,7 +576,8 @@ function renderTimeline(){
       const a=AREAS[t.area];
       const em=a.emoji?`<span class="tag-emoji">${a.emoji}</span>`:'';
       const rep=t.recurring?`<span class="rep">${ICON.repeat}</span>`:'';
-      return `<div class="chip" data-task-id="${t.id}" style="background:var(--card); border-color:var(--line2); color:var(--ink); --ac:${a.color};">
+      const sel=selectMode && selectedTasks.has(t.id);
+      return `<div class="chip${sel?' selected':''}" data-task-id="${t.id}" style="background:var(--card); border-color:${sel?'var(--ac)':'var(--line2)'}; color:var(--ink); --ac:${a.color};${sel?' box-shadow:0 0 0 2px var(--ac);':''}">
         <div class="chip-top"><div class="ct-left"><span class="cbx" data-cbx="task" data-id="${t.id}">${ICON.check}</span>${em}${rep}</div><button class="edit-btn" data-editbtn data-kind="task" data-id="${t.id}" aria-label="Edit">${ICON.pencil}</button></div>
         <span class="lbl" data-edit data-kind="task" data-id="${t.id}">${t.title}</span></div>`;
     }).join("");
@@ -597,6 +606,7 @@ function renderTimeline(){
     <div class="divider" id="railDivider" aria-label="Resize areas"></div>
     <div class="rail">
       <div class="rail-head"><span class="t">Areas</span><div class="rail-actions">
+        <button class="icon-btn ${selectMode?'active':''}" id="toggleSelect" aria-label="Select tasks" style="width:28px;height:28px;">${ICON.select}</button>
         <button class="icon-btn" id="addArea" aria-label="Add area" style="width:28px;height:28px;">${ICON.plus}</button>
         <button class="icon-btn" id="railToggle" aria-label="Hide areas" style="width:28px;height:28px;">${ICON.chevR}</button>
       </div></div>
@@ -604,7 +614,7 @@ function renderTimeline(){
     </div>`:'';
   const expandBtn=railOpen?'':`<button class="rail-expand" id="railToggle" aria-label="Show areas">${ICON.chevL}</button>`;
   return `<div class="main" style="grid-template-columns:${gridCols};">
-    <div class="tl-wrap"><div class="tl-scroll"><div class="tl-inner" style="--colw:${COLW}px; width:calc(var(--colw) * ${totalDays});">
+    <div class="tl-wrap"><div class="tl-scroll"><div class="tl-inner${selectMode?' selecting':''}" style="--colw:${COLW}px; width:calc(var(--colw) * ${totalDays});">
       <div class="tl-head">
         <div class="wk-head" style="grid-template-columns:repeat(${win.weeks}, calc(var(--colw) * 7));">${weekCells}</div>
         <div class="day-head" style="grid-template-columns:repeat(${totalDays}, var(--colw));">${dayHeadCells}</div>
@@ -851,6 +861,56 @@ function initSched(){
   });
 }
 
+/* ---- multi-select tasks: bulk area / date / done, optimistic then reconciled via syncPull ---- */
+function setSelectMode(on){ selectMode=on; if(!on) selectedTasks.clear(); mount(); }
+function toggleTaskSelect(id){ if(selectedTasks.has(id)) selectedTasks.delete(id); else selectedTasks.add(id); mount(); }
+function selectedTaskItems(){ return [...selectedTasks].map(id=>TASKS.find(t=>t.id===id)).filter(Boolean); }
+function bulkSetArea(area){
+  const items=selectedTaskItems(); if(!items.length) return;
+  pushUndo();
+  items.forEach(t=>{ t.area=area; saveTask(t); });
+  mount();
+  pending++;
+  Promise.all(items.map(t=>sync("update",{id:t.id, area})))
+    .then(()=>syncPull()).then(()=>{ if(view.page==="timeline" && !uiBusy()) mount(); }).finally(()=>{ pending--; });
+}
+function bulkSetDate(idx){
+  const items=selectedTaskItems(); if(!items.length) return;
+  pushUndo();
+  items.forEach(t=>{ moveTaskTo(t, idx, null); });
+  items.forEach(saveTask);
+  mount();
+  pending++;
+  Promise.all(items.map(t=>sync("update",{id:t.id, due_date:ymd(idx)})))
+    .then(()=>syncPull()).then(()=>{ if(view.page==="timeline" && !uiBusy()) mount(); }).finally(()=>{ pending--; });
+}
+function bulkSetDone(done){
+  const items=selectedTaskItems(); if(!items.length) return;
+  pushUndo();
+  items.forEach(t=>{ t.done=done; saveTask(t); if(done) logDone(t); else unlogDone(t.id); });
+  if(done) items.forEach(t=>selectedTasks.delete(t.id));   // completed tasks drop off the timeline
+  mount();
+  pending++;
+  Promise.all(items.map(t=>sync(done?"complete":"reopen",{id:t.id})))
+    .then(()=>syncPull()).then(()=>{ if(view.page==="timeline" && !uiBusy()) mount(); }).finally(()=>{ pending--; });
+}
+function renderSelectPanel(){
+  const n=selectedTasks.size;
+  const areaChips=Object.entries(AREAS).map(([k,a])=>`<button type="button" class="area-chip" data-selarea="${k}"><span class="ac-emoji">${a.emoji||'•'}</span><span class="ac-name">${a.name}</span></button>`).join('');
+  return `<div class="select-panel" id="selectPanel">
+    <div class="sched-head"><span>${n} task${n===1?'':'s'} selected</span><button class="txt-btn" id="selectDone">Done</button></div>
+    <div style="padding:14px 14px 0; overflow:auto; flex:1 1 auto;">
+      <div class="field"><label>Move to area</label><div class="area-pick">${areaChips||'<div class="hint" style="margin:0;">No areas yet.</div>'}</div></div>
+      <div class="field"><label>Set date</label><input type="date" id="selDate"></div>
+      <div class="field" style="display:flex; gap:8px;">
+        <button class="txt-btn" id="selComplete" style="flex:1;">Mark complete</button>
+        <button class="txt-btn" id="selReopen" style="flex:1;">Mark incomplete</button>
+      </div>
+    </div>
+    <div class="sched-hint">Tap tasks on the timeline to select or deselect them.</div>
+  </div>`;
+}
+
 function renderSettings(){
   const pct=Math.round(uiScale*100);
   return `<div class="search-overlay" id="settingsOverlay"><div class="search-box" style="width:min(440px,92vw);">
@@ -997,6 +1057,7 @@ function moveTaskTo(t, day, beforeId){
 function initChips(){
   document.querySelectorAll('.chip[data-task-id]').forEach(ch=>{
     ch.addEventListener('pointerdown', ev=>{
+      if(selectMode) return;   // selection is handled as a plain click, not a drag
       if(editing || pinch) return; if(ev.target.closest('.cbx') || ev.target.closest('.edit-btn')) return;
       if(pPencilOnly && ev.pointerType!=='pen') return;
       const id=ch.dataset.taskId; const t=TASKS.find(x=>x.id===id); if(!t) return;
@@ -1120,7 +1181,7 @@ function mount(){
   if(view.page==="timeline") body=renderTimeline();
   else if(view.page==="area") body=renderArea(view.area);
   else body=renderAreaForm(view.page); // add | edit
-  app.innerHTML=sidebar()+'<div class="content">'+topbar()+body+'</div>'+(searchOpen?renderSearch():"")+(settingsOpen?renderSettings():"")+(addOpen?renderAdd():"")+(editOpen?renderEdit():"")+(schedOpen?renderSched():"")+(menuOpen?renderMenu():"");
+  app.innerHTML=sidebar()+'<div class="content">'+topbar()+body+'</div>'+(searchOpen?renderSearch():"")+(settingsOpen?renderSettings():"")+(addOpen?renderAdd():"")+(editOpen?renderEdit():"")+(schedOpen?renderSched():"")+(menuOpen?renderMenu():"")+(selectMode?renderSelectPanel():"");
   if(view.page==="area") recalcGrade();
   if((view.page==="add"||view.page==="edit") && draft && draft.cover) initCrop();
   if(view.page==="timeline") initTimeline();
@@ -1208,6 +1269,17 @@ async function unsplashSearch(q){
 }
 
 document.addEventListener('click', async e=>{
+  /* multi-select: a chip tap toggles selection instead of its normal action */
+  if(selectMode){
+    const selChip=e.target.closest('.chip[data-task-id]');
+    if(selChip){ e.stopPropagation(); toggleTaskSelect(selChip.dataset.taskId); return; }
+  }
+  if(e.target.closest('#toggleSelect')){ setSelectMode(!selectMode); return; }
+  if(e.target.closest('#selectDone')){ setSelectMode(false); return; }
+  const selArea=e.target.closest('[data-selarea]');
+  if(selArea){ bulkSetArea(selArea.dataset.selarea); return; }
+  if(e.target.closest('#selComplete')){ bulkSetDone(true); return; }
+  if(e.target.closest('#selReopen')){ bulkSetDone(false); return; }
   /* checkboxes */
   const cbx=e.target.closest('[data-cbx]');
   if(cbx){ e.stopPropagation(); const isProj=cbx.dataset.cbx==="proj"; const list=isProj?PROJECTS:TASKS;
@@ -1425,6 +1497,7 @@ document.addEventListener('input', e=>{
 
 document.addEventListener('change', e=>{
   if(e.target.classList && e.target.classList.contains('sched-date')){ if(e.target.value){ pushUndo(); scheduleUnsched(e.target.dataset.usid, idxOfStr(e.target.value)); } return; }
+  if(e.target.id==="selDate"){ if(e.target.value) bulkSetDate(idxOfStr(e.target.value)); return; }
   if(e.target.id==="themeToggle"){ applyTheme(e.target.checked?"dark":"light"); return; }
   if(e.target.id==="prefPencil"){ pPencilOnly=e.target.checked; persistPref('tms_pencilOnly',pPencilOnly); applyPenMode(); return; }
   if(e.target.id==="prefTap"){ pTapUndo=e.target.checked; persistPref('tms_tapUndo',pTapUndo); return; }
@@ -1441,7 +1514,7 @@ document.addEventListener('keydown', e=>{
   if(e.key==="Enter" && e.target.id==="unsQ"){ e.preventDefault(); const q=e.target.value.trim(); if(q) unsplashSearch(q); }
   if(e.key==="Enter" && e.target.id==="addTitle"){ const b=document.getElementById('addSave'); if(b) b.click(); }
   if(e.key==="Enter" && e.target.id==="editTitle"){ const b=document.getElementById('editSave'); if(b) b.click(); }
-  if(e.key==="Escape"){ if(menuOpen){ menuOpen=false; mount(); } else if(editOpen){ editOpen=false; editDraft=null; mount(); } else if(addOpen){ addOpen=false; addDraft=null; mount(); } else if(schedOpen){ schedOpen=false; mount(); } else if(settingsOpen){ settingsOpen=false; mount(); } else if(searchOpen){ searchOpen=false; mount(); } }
+  if(e.key==="Escape"){ if(menuOpen){ menuOpen=false; mount(); } else if(editOpen){ editOpen=false; editDraft=null; mount(); } else if(addOpen){ addOpen=false; addDraft=null; mount(); } else if(schedOpen){ schedOpen=false; mount(); } else if(settingsOpen){ settingsOpen=false; mount(); } else if(searchOpen){ searchOpen=false; mount(); } else if(selectMode){ setSelectMode(false); } }
 });
 document.addEventListener('focusout', e=>{ if(editing && e.target===editing.el) commitTitleEdit(false); });
 
@@ -1578,7 +1651,7 @@ function dataSig(){ return JSON.stringify([
   TASKS.map(t=>[t.id,t.area,t.title,t.day,t.done,t.ord]),
   UNSCHED.length ]); }
 /* true when the user is mid-interaction and a silent re-render would be disruptive */
-function uiBusy(){ return searchOpen||settingsOpen||addOpen||editOpen||schedOpen||menuOpen||!!editing||!!draft; }
+function uiBusy(){ return searchOpen||settingsOpen||addOpen||editOpen||schedOpen||menuOpen||!!editing||!!draft||selectMode; }
 
 const SYNC_INTERVAL=30000;   // background Todoist sync cadence
 async function backgroundSync(){
